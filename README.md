@@ -8,7 +8,7 @@
 - 系统设置备用：StrongSwan IKEv2/IPsec EAP。
 - FLClash 备用：每台设备独立的 Mihomo YAML 长期订阅 URL。
 
-开始部署前先阅读 [宝塔部署方案](docs/BAOTA_DEPLOYMENT.md) 和 [详细配置方案](docs/CONFIGURATION.md)。
+开始部署前先阅读 [宝塔部署方案](docs/BAOTA_DEPLOYMENT.md)、[宝塔端口配置](docs/BAOTA_PORT_CONFIGURATION.md) 和 [详细配置方案](docs/CONFIGURATION.md)。
 
 ## 构建
 
