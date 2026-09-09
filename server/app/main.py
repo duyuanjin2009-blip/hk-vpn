@@ -410,7 +410,9 @@ def api(req: Request, start_response):
         if not row:
             return json_response(start_response, HTTPStatus.NOT_FOUND, {"error": "device not found"})
         if action == "wireguard.conf" and req.method == "GET":
-            return response(start_response, HTTPStatus.OK, wireguard_config(row).encode(), "text/plain; charset=utf-8", [("Content-Disposition", f'attachment; filename="{row["name"]}.conf"'), ("Cache-Control", "no-store")])
+            # WSGI headers are Latin-1. Device names may be Chinese, so never put
+            # them in Content-Disposition; the opaque ID is URL/header safe.
+            return response(start_response, HTTPStatus.OK, wireguard_config(row).encode(), "text/plain; charset=utf-8", [("Content-Disposition", f'attachment; filename="hk-vpn-{row["id"]}.conf"'), ("Cache-Control", "no-store")])
         if action == "ikev2" and req.method == "GET":
             return json_response(start_response, HTTPStatus.OK, {"server": WG_ENDPOINT.rsplit(":", 1)[0], "username": row["ike_username"], "password": row["ike_password"], "type": "IKEv2 / IPsec EAP-MSCHAPv2"})
         if action == "reconcile" and req.method == "POST":
