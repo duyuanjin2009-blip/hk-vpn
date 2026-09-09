@@ -30,6 +30,10 @@ def command(*args: str) -> None:
     subprocess.run(args, check=True, timeout=30)
 
 
+def command_output(*args: str) -> str:
+    return subprocess.run(args, check=False, timeout=15, capture_output=True, text=True).stdout
+
+
 def read_state() -> dict[str, dict[str, str]]:
     if not STATE_PATH.exists():
         return {}
@@ -118,6 +122,21 @@ def reconcile(_: argparse.Namespace) -> None:
     write_ike_secrets(state)
 
 
+def status(_: argparse.Namespace) -> None:
+    """Return non-secret service checks for the web dashboard."""
+    listeners = command_output("ss", "-H", "-l", "-n", "-u")
+    nat_rules = command_output("iptables", "-t", "nat", "-S", "POSTROUTING")
+    forwarding = Path("/proc/sys/net/ipv4/ip_forward").read_text().strip() == "1"
+    print(json.dumps({
+        "wireguardInterface": Path(f"/sys/class/net/{WG_INTERFACE}").exists(),
+        "wireguardPort": bool(re.search(r"(?:\\[::\\]|0\\.0\\.0\\.0):51820\\b", listeners)),
+        "ipForward": forwarding,
+        "nat": "MASQUERADE" in nat_rules,
+        "strongSwan": subprocess.run(["systemctl", "is-active", "--quiet", "strongswan-swanctl.service"], check=False).returncode == 0
+            or subprocess.run(["systemctl", "is-active", "--quiet", "strongswan-starter.service"], check=False).returncode == 0,
+    }, separators=(",", ":")))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(required=True)
@@ -126,6 +145,7 @@ def main() -> None:
     add.add_argument("--ike-user", required=True); add.add_argument("--ike-password", required=True); add.set_defaults(func=add_device)
     remove = sub.add_parser("remove-device"); remove.add_argument("--id", required=True); remove.set_defaults(func=remove_device)
     reconcile_cmd = sub.add_parser("reconcile"); reconcile_cmd.set_defaults(func=reconcile)
+    status_cmd = sub.add_parser("status"); status_cmd.set_defaults(func=status)
     args = parser.parse_args(); args.func(args)
 
 
