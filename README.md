@@ -1,10 +1,8 @@
 # HK VPN Suite
 
-个人自用的香港服务器网络套件，包含：
+个人自用的香港服务器网络套件。当前维护重点是网页控制台和 FLClash/WireGuard 连接，包含：
 
 - 浏览器控制台：设备、WireGuard 配置、IKEv2 账号、FLClash 订阅 URL 与撤销管理。
-- Android 原生客户端：登录控制台后用 WireGuard 一键连接。
-- Windows 原生客户端：登录控制台后调用本机官方 WireGuard 创建一键隧道。
 - 系统设置备用：StrongSwan IKEv2/IPsec EAP。
 - FLClash 备用：每台设备独立的 Mihomo YAML 长期订阅 URL。
 
@@ -16,7 +14,7 @@ GitHub Actions 会自动执行服务器单元测试，并产出 Android APK 与 
 
 ## 连接方式
 
-1. Android/Windows 自研客户端：WireGuard。
+1. WireGuard 官方客户端：导入控制台下载的配置。
 2. Windows/Android 系统 VPN 设置：IKEv2/IPsec。
 3. FLClash：导入控制台显示的 `https://你的域名/sub/...yaml`。
 
