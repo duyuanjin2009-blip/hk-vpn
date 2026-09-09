@@ -130,7 +130,10 @@ chmod 600 /etc/swanctl/conf.d/hk-vpn-users.conf
 install -m 644 "$install_dir/server/systemd/hk-vpn-panel.service" /etc/systemd/system/hk-vpn-panel.service
 install -m 644 "$install_dir/server/systemd/hk-vpn-reconcile.service" /etc/systemd/system/hk-vpn-reconcile.service
 systemctl daemon-reload
-systemctl enable --now wg-quick@wg0.service
+# A previous installation may already have wg0 active. Restart so the newly
+# written PostUp rules (forwarding and NAT) are always applied.
+systemctl enable wg-quick@wg0.service
+systemctl restart wg-quick@wg0.service
 if systemctl cat strongswan-swanctl.service >/dev/null 2>&1; then
   systemctl enable --now strongswan-swanctl.service
 else
