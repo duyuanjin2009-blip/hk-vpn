@@ -15,6 +15,7 @@ os.environ["HKVPN_PUBLIC_URL"] = "https://panel.test"
 os.environ["HKVPN_WG_ENDPOINT"] = "vpn.test:51820"
 os.environ["HKVPN_WG_PUBLIC_KEY"] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 os.environ["HKVPN_CTL"] = "/helper-not-installed"
+os.environ["HKVPN_TEST_MODE"] = "1"
 
 from app.main import application  # noqa: E402
 
