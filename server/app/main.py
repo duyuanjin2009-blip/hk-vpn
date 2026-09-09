@@ -116,7 +116,7 @@ def wg_keypair() -> tuple[str, str]:
     # The control helper is installed by deploy-bt.sh. Requiring it here keeps
     # development/CI deterministic on runners which happen to have `wg`, while
     # production continues to generate genuine WireGuard keys.
-    if shutil.which("wg") and Path(VPNCTL).exists():
+    if os.environ.get("HKVPN_TEST_MODE") != "1" and shutil.which("wg") and Path(VPNCTL).exists():
         private = subprocess.run(["wg", "genkey"], check=True, capture_output=True, text=True).stdout.strip()
         public = subprocess.run(["wg", "pubkey"], check=True, input=private + "\n", capture_output=True, text=True).stdout.strip()
         return private, public
