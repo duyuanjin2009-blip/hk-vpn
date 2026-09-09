@@ -10,6 +10,13 @@ android { namespace = "cc.duyuan.hkvpn"; compileSdk = 35
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    buildTypes {
+        getByName("release") {
+            // Personal-use default: emit an installable APK. Replace this with a
+            // private release keystore before distributing it to other people.
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
 }
 
 dependencies {
