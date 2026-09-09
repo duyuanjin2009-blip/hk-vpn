@@ -40,6 +40,12 @@ Android 与 Windows 客户端在首次使用时输入控制台地址与管理密
 - Windows 首次连接需要安装官方 WireGuard；程序会请求管理员权限创建 Windows 隧道服务。
 - Android 首次连接会显示系统 VPN 授权弹窗，这是 Android 的正常限制。
 
+#### Android 设备适配
+
+Android 客户端的 `minSdk` 为 23，因此覆盖 Android 6.0 及以上的手机、平板和常见国产 ROM。界面按 dp 而非固定像素排版：小屏手机保留 20dp 边距，大屏/平板将内容限制在 560dp 宽并居中，横竖屏切换后会保留已输入的控制台地址。APK 内含 WireGuard 的常用 ARM/ARM64/x86/x86_64 原生库；Android 会只安装与设备 CPU 匹配的部分。
+
+首次连接前客户端会主动请求系统 VPN 权限。Android 10 及以上、华为/小米/OPPO/vivo 等系统若有“电池优化”“后台限制”选项，建议将 HK VPN 设为不受限制，避免锁屏后后台网络被系统回收。系统 VPN 备用的 IKEv2 菜单在部分 Android ROM 中可能被厂商移除，不影响主 WireGuard 连接。
+
 ### 2. 系统设置备用：IKEv2/IPsec
 
 每个设备在控制台中都有独立的 IKEv2 用户名和密码。服务器使用公开受信任的 Baota TLS 证书认证自身，因此客户端填写的是域名而不是 IP。
