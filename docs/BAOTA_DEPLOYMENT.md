@@ -44,6 +44,16 @@ curl http://127.0.0.1:8787/login
 journalctl -u wg-quick@wg0 -n 100 --no-pager
 ```
 
+### 完整重装
+
+仅当需要让所有旧设备、订阅 URL 和服务器密钥失效时使用。脚本会先将旧状态备份到 `/root/hk-vpn-backup-日期时间.tar.gz`，再删除 HK VPN 自己的状态文件并重新部署；不会删除宝塔、网站文件或证书。密码会在服务器终端交互输入，不会写入 GitHub。
+
+```bash
+cd /root/hk-vpn-suite/server/scripts
+chmod +x reinstall.sh
+./reinstall.sh --domain vpn.example.com --confirm-reset
+```
+
 ## 2. 在宝塔签发证书并反向代理
 
 1. 宝塔网站 → 添加站点，域名填写 `vpn.example.com`，网站目录可任意空目录。

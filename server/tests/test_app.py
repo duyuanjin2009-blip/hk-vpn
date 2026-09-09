@@ -23,6 +23,9 @@ def request(path, method="GET", body=None, cookie=""):
     raw = body if isinstance(body, bytes) else (json.dumps(body).encode() if body is not None else b"")
     received = {}
     def start_response(status, headers):
+        # wsgiref encodes headers as Latin-1 before they reach the client.
+        for header_name, header_value in headers:
+            header_name.encode("latin-1"); header_value.encode("latin-1")
         received["status"] = status; received["headers"] = dict(headers)
     result = application({"REQUEST_METHOD": method, "PATH_INFO": path, "wsgi.input": io.BytesIO(raw), "CONTENT_LENGTH": str(len(raw)), "HTTP_COOKIE": cookie}, start_response)
     return received, b"".join(result)
@@ -50,6 +53,17 @@ class PanelTests(unittest.TestCase):
         response, body = request(f"/api/devices/{device['id']}/ikev2", cookie=cookie)
         self.assertTrue(response["status"].startswith("200"))
         self.assertEqual(json.loads(body)["type"], "IKEv2 / IPsec EAP-MSCHAPv2")
+
+    def test_chinese_device_name_has_ascii_config_download_header(self):
+        response, _ = request("/login", "POST", b"password=test-password")
+        cookie = response["headers"]["Set-Cookie"].split(";", 1)[0]
+        response, body = request("/api/devices", "POST", {"name": "我的安卓手机", "platform": "Android"}, cookie)
+        self.assertTrue(response["status"].startswith("201"))
+        device = json.loads(body)["device"]
+        response, body = request(f"/api/devices/{device['id']}/wireguard.conf", cookie=cookie)
+        self.assertTrue(response["status"].startswith("200"))
+        self.assertEqual(response["headers"]["Content-Disposition"], f'attachment; filename="hk-vpn-{device["id"]}.conf"')
+        self.assertIn(b"[Interface]", body)
 
 
 if __name__ == "__main__":

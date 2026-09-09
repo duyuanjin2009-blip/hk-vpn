@@ -113,7 +113,10 @@ def database() -> sqlite3.Connection:
 
 def wg_keypair() -> tuple[str, str]:
     """Use real wg tooling in production; provide a clearly non-production fallback for tests."""
-    if shutil.which("wg"):
+    # The control helper is installed by deploy-bt.sh. Requiring it here keeps
+    # development/CI deterministic on runners which happen to have `wg`, while
+    # production continues to generate genuine WireGuard keys.
+    if shutil.which("wg") and Path(VPNCTL).exists():
         private = subprocess.run(["wg", "genkey"], check=True, capture_output=True, text=True).stdout.strip()
         public = subprocess.run(["wg", "pubkey"], check=True, input=private + "\n", capture_output=True, text=True).stdout.strip()
         return private, public
@@ -410,7 +413,9 @@ def api(req: Request, start_response):
         if not row:
             return json_response(start_response, HTTPStatus.NOT_FOUND, {"error": "device not found"})
         if action == "wireguard.conf" and req.method == "GET":
-            return response(start_response, HTTPStatus.OK, wireguard_config(row).encode(), "text/plain; charset=utf-8", [("Content-Disposition", f'attachment; filename="{row["name"]}.conf"'), ("Cache-Control", "no-store")])
+            # WSGI headers are Latin-1. Device names may be Chinese, so never put
+            # them in Content-Disposition; the opaque ID is URL/header safe.
+            return response(start_response, HTTPStatus.OK, wireguard_config(row).encode(), "text/plain; charset=utf-8", [("Content-Disposition", f'attachment; filename="hk-vpn-{row["id"]}.conf"'), ("Cache-Control", "no-store")])
         if action == "ikev2" and req.method == "GET":
             return json_response(start_response, HTTPStatus.OK, {"server": WG_ENDPOINT.rsplit(":", 1)[0], "username": row["ike_username"], "password": row["ike_password"], "type": "IKEv2 / IPsec EAP-MSCHAPv2"})
         if action == "reconcile" and req.method == "POST":

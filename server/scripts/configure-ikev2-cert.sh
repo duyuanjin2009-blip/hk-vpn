@@ -10,6 +10,11 @@ source_dir="/www/server/panel/vhost/cert/$domain"
 install -d -m 755 /etc/swanctl/x509 /etc/swanctl/private
 install -m 644 "$source_dir/fullchain.pem" /etc/swanctl/x509/hk-vpn-cert.pem
 install -m 600 "$source_dir/privkey.pem" /etc/swanctl/private/hk-vpn-key.pem
+if systemctl cat strongswan-swanctl.service >/dev/null 2>&1; then
+  systemctl start strongswan-swanctl.service
+else
+  systemctl start strongswan-starter.service
+fi
 swanctl --load-creds
 swanctl --load-conns
 systemctl restart strongswan-swanctl 2>/dev/null || systemctl restart strongswan-starter
