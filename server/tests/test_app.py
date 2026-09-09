@@ -16,6 +16,9 @@ os.environ["HKVPN_WG_ENDPOINT"] = "vpn.test:51820"
 os.environ["HKVPN_WG_PUBLIC_KEY"] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 os.environ["HKVPN_CTL"] = "/helper-not-installed"
 os.environ["HKVPN_TEST_MODE"] = "1"
+_protocol_file = Path(tempfile.mkdtemp(prefix="hkvpn-protocols-")) / "protocols.json"
+_protocol_file.write_text(json.dumps({"nodes": [{"id": "hysteria2", "enabled": False, "config": {"name": "HK Hysteria2", "server": "vpn.example.com", "password": "REPLACE_WITH_PASSWORD"}}]}))
+os.environ["HKVPN_PROTOCOLS_FILE"] = str(_protocol_file)
 
 from app.main import application  # noqa: E402
 
@@ -65,6 +68,18 @@ class PanelTests(unittest.TestCase):
         self.assertTrue(response["status"].startswith("200"))
         self.assertEqual(response["headers"]["Content-Disposition"], f'attachment; filename="hk-vpn-{device["id"]}.conf"')
         self.assertIn(b"[Interface]", body)
+
+    def test_template_protocol_cannot_be_enabled_and_device_name_updates_node(self):
+        response, _ = request("/login", "POST", b"password=test-password")
+        cookie = response["headers"]["Set-Cookie"].split(";", 1)[0]
+        response, body = request("/api/protocols/hysteria2", "PATCH", {"enabled": True}, cookie)
+        self.assertTrue(response["status"].startswith("409"))
+        response, body = request("/api/devices", "POST", {"name": "旧名称", "platform": "FLClash"}, cookie)
+        device = json.loads(body)["device"]
+        response, _ = request(f"/api/devices/{device['id']}", "PATCH", {"name": "我的香港节点"}, cookie)
+        self.assertTrue(response["status"].startswith("200"))
+        response, body = request(device["subscriptionUrl"].replace("https://panel.test", ""))
+        self.assertIn("我的香港节点 · WireGuard".encode(), body)
 
 
 if __name__ == "__main__":
