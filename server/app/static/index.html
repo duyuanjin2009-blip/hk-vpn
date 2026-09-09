@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HK VPN Suite</title><link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <header><div><p class="eyebrow">PERSONAL NETWORK</p><h1>HK VPN Suite</h1><p id="status">正在读取服务器状态…</p></div><form method="post" action="/logout"><button class="secondary">退出</button></form></header>
+  <main>
+    <section class="hero"><div><h2>三种连接方式，一个后台</h2><p>自研客户端使用 WireGuard；系统设置备用使用 IKEv2；FLClash 通过长期订阅 URL 导入。</p></div><button id="new-device">新增设备</button></section>
+    <section><div class="section-title"><h2>设备</h2><p>每台设备各有独立配置，可单独撤销。</p></div><div id="devices" class="device-grid"></div></section>
+    <section><div class="section-title"><h2>FLClash 协议节点</h2><p>订阅会包含 WireGuard 和这里启用的附加节点。</p></div><div id="protocols" class="protocol-list"></div></section>
+  </main>
+  <dialog id="device-dialog"><form method="dialog" id="device-form"><div class="dialog-head"><h2>新增设备</h2><button class="icon" value="cancel" aria-label="关闭">×</button></div><label>设备名称<input id="device-name" required maxlength="64" placeholder="例如：我的 Android 手机"></label><label>设备类型<select id="device-platform"><option>Android</option><option>Windows</option><option>FLClash</option><option>System VPN</option></select></label><p class="hint">创建后会生成 WireGuard、IKEv2 和 FLClash 三种方式所需的信息。</p><button id="create-device" value="default">创建</button></form></dialog>
+  <dialog id="detail-dialog"><div class="dialog-head"><h2 id="detail-title">设备配置</h2><button class="icon" id="close-detail" aria-label="关闭">×</button></div><div id="detail-content"></div></dialog>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

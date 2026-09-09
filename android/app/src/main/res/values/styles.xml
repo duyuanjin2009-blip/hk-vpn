@@ -1,0 +1,5 @@
+<resources>
+  <style name="Theme.HKVpn" parent="Theme.Material3.DayNight.NoActionBar">
+    <item name="android:fontFamily">sans</item><item name="android:colorAccent">#32C8F4</item>
+  </style>
+</resources>

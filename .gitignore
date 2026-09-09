@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite
+.idea/
+.gradle/
+android/.gradle/
+android/app/build/
+windows/**/bin/
+windows/**/obj/
+*.user
+*.suo

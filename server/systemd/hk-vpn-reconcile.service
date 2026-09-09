@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore HK VPN Suite WireGuard peers after boot
+After=wg-quick@wg0.service strongswan-swanctl.service
+Requires=wg-quick@wg0.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/hk-vpn/vpnctl.py reconcile
+
+[Install]
+WantedBy=multi-user.target

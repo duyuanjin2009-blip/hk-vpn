@@ -1,0 +1,84 @@
+{
+  "nodes": [
+    {
+      "id": "hysteria2",
+      "enabled": false,
+      "config": {
+        "name": "Hong Kong · Hysteria2",
+        "type": "hysteria2",
+        "server": "vpn.example.com",
+        "port": 8443,
+        "password": "REPLACE_WITH_A_LONG_RANDOM_PASSWORD",
+        "sni": "vpn.example.com",
+        "skip-cert-verify": false
+      }
+    },
+    {
+      "id": "tuic",
+      "enabled": false,
+      "config": {
+        "name": "Hong Kong · TUIC",
+        "type": "tuic",
+        "server": "vpn.example.com",
+        "port": 8444,
+        "uuid": "REPLACE_WITH_UUID",
+        "password": "REPLACE_WITH_PASSWORD",
+        "sni": "vpn.example.com",
+        "alpn": ["h3"],
+        "skip-cert-verify": false
+      }
+    },
+    {
+      "id": "shadowsocks2022",
+      "enabled": false,
+      "config": {
+        "name": "Hong Kong · Shadowsocks 2022",
+        "type": "ss",
+        "server": "vpn.example.com",
+        "port": 8388,
+        "cipher": "2022-blake3-aes-128-gcm",
+        "password": "REPLACE_WITH_2022_SERVER_KEY",
+        "udp": true
+      }
+    },
+    {
+      "id": "vless",
+      "enabled": false,
+      "config": {
+        "name": "Hong Kong · VLESS",
+        "type": "vless",
+        "server": "vpn.example.com",
+        "port": 443,
+        "uuid": "REPLACE_WITH_UUID",
+        "network": "grpc",
+        "tls": true,
+        "servername": "vpn.example.com"
+      }
+    },
+    {
+      "id": "trojan",
+      "enabled": false,
+      "config": {
+        "name": "Hong Kong · Trojan",
+        "type": "trojan",
+        "server": "vpn.example.com",
+        "port": 443,
+        "password": "REPLACE_WITH_PASSWORD",
+        "sni": "vpn.example.com"
+      }
+    },
+    {
+      "id": "openvpn",
+      "enabled": false,
+      "config": {
+        "name": "Hong Kong · OpenVPN",
+        "type": "openvpn",
+        "server": "vpn.example.com",
+        "port": 1194,
+        "udp": true,
+        "cipher": "AES-256-GCM",
+        "auth": "sha256"
+      }
+    }
+  ]
+}
