@@ -82,11 +82,9 @@ swanctl --list-conns
 
 ## 4. 验证三种连接方式
 
-### WireGuard / 自研客户端
+### WireGuard（推荐）
 
-Android 或 Windows 程序首次输入 `https://vpn.example.com` 和管理密码，点击 Connect。Windows 需要先从 WireGuard 官方安装程序安装 WireGuard；Android 会出现系统 VPN 授权。
-
-也可以在控制台详情下载 WireGuard 配置，用官方客户端手工导入作为排错方式。
+网页控制台新建设备后，下载 WireGuard 配置并导入官方 WireGuard 客户端。这是排错和日常连接最稳定的方式。
 
 ### IKEv2 系统设置
 
@@ -99,7 +97,7 @@ journalctl -u strongswan-swanctl -n 100 --no-pager
 
 ### FLClash URL
 
-控制台详情复制 `subscriptionUrl`。FLClash 添加 URL 配置，选择节点后启用 TUN Mode。默认只有 WireGuard 节点；不要在协议服务没部署前启用 JSON 中的可选节点。
+控制台详情复制 `subscriptionUrl`。FLClash 添加 URL 配置后，选择节点并打开客户端的 VPN/TUN 功能。默认只有 WireGuard 节点；不要在协议服务没部署前启用 JSON 中的可选节点。控制台设备卡片的“改节点名”会更新订阅里的 WireGuard 节点名；FLClash 自己显示的订阅配置标题仍可能需要在 FLClash 内重命名。
 
 ## 5. 启用附加 FLClash 协议
 
@@ -107,7 +105,23 @@ journalctl -u strongswan-swanctl -n 100 --no-pager
 
 对 443/TCP 上的 VLESS、Trojan 和网页 HTTPS，必须使用 Nginx stream/SNI 分流或独立端口；不要让两个程序直接争抢同一个端口。对 Hysteria2 若使用 UDP 443，则不要让 Nginx 启用 HTTP/3；默认 UDP 8443 可避免冲突。
 
-## 6. 更新与回滚
+## 6. 安全更新网页控制台（不会重置 VPN）
+
+**不要为了更新网页界面重新运行 `deploy-bt.sh`。** 基础安装脚本会生成新的 WireGuard 服务器密钥，旧设备会失效。
+
+从 GitHub 拉取新版源码后，仅执行下面的更新脚本。它只更新网页、服务程序和受限管理助手，保留 `/etc/wireguard/wg0.conf`、`/etc/hk-vpn/`、已创建设备和订阅 URL，且不会重启 `wg0`：
+
+```bash
+cd /root/hk-vpn-suite
+git pull
+chmod +x server/scripts/update-panel.sh
+./server/scripts/update-panel.sh
+systemctl status hk-vpn-panel --no-pager
+```
+
+刷新浏览器后可看到“服务状态与端口检测”。它会显示 WireGuard 接口、UDP 51820 监听、IPv4 转发、NAT 规则和 StrongSwan 服务的服务器侧状态；它不能替代外网 UDP 实测。
+
+## 7. 回滚
 
 更新前先备份状态文件，再把新版本上传到 `/root` 并重新运行安装脚本。部署脚本不会主动删除已有 SQLite 数据库或设备状态。
 
@@ -117,4 +131,4 @@ cp -a /etc/hk-vpn /root/hk-vpn-system-backup
 systemctl restart hk-vpn-panel
 ```
 
-若更新出错，恢复备份、重新启动 `wg-quick@wg0` 和 `hk-vpn-panel` 即可。
+若更新出错，恢复备份后只重启 `hk-vpn-panel`。除非 WireGuard 本身损坏，否则不需要重启 `wg0`。
