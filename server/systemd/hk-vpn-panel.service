@@ -18,7 +18,9 @@ RestartSec=3
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/hk-vpn-panel /etc/hk-vpn
+# hkvpn cannot write /etc/swanctl by Unix permissions; this writable mount is
+# solely for the narrowly scoped root vpnctl helper invoked via sudo.
+ReadWritePaths=/var/lib/hk-vpn-panel /etc/hk-vpn /etc/swanctl
 
 [Install]
 WantedBy=multi-user.target
