@@ -113,7 +113,10 @@ def database() -> sqlite3.Connection:
 
 def wg_keypair() -> tuple[str, str]:
     """Use real wg tooling in production; provide a clearly non-production fallback for tests."""
-    if shutil.which("wg"):
+    # The control helper is installed by deploy-bt.sh. Requiring it here keeps
+    # development/CI deterministic on runners which happen to have `wg`, while
+    # production continues to generate genuine WireGuard keys.
+    if shutil.which("wg") and Path(VPNCTL).exists():
         private = subprocess.run(["wg", "genkey"], check=True, capture_output=True, text=True).stdout.strip()
         public = subprocess.run(["wg", "pubkey"], check=True, input=private + "\n", capture_output=True, text=True).stdout.strip()
         return private, public
