@@ -12,7 +12,9 @@ WorkingDirectory=/opt/hk-vpn-suite/server
 ExecStart=/usr/bin/python3 -m app.main
 Restart=on-failure
 RestartSec=3
-NoNewPrivileges=true
+# The panel runs unprivileged, but its deliberately narrow sudoers rule invokes
+# vpnctl.py as root to update WireGuard/StrongSwan. Do not set
+# NoNewPrivileges here: it would disable that approved privilege transition.
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
