@@ -134,8 +134,28 @@ def protocol_catalog() -> dict[str, Any]:
         return {"nodes": []}
 
 
+def protocol_ready(node: dict[str, Any]) -> tuple[bool, str | None]:
+    """A template must not reach a subscription before it is fully configured."""
+    config = node.get("config")
+    if not isinstance(config, dict):
+        return False, "缺少协议配置"
+    raw = json.dumps(config, ensure_ascii=False)
+    if "REPLACE_WITH_" in raw or "vpn.example.com" in raw:
+        return False, "尚未填写真实域名、密码或 UUID"
+    return True, None
+
+
+def public_protocol(node: dict[str, Any]) -> dict[str, Any]:
+    ready, reason = protocol_ready(node)
+    config = node.get("config") if isinstance(node.get("config"), dict) else {}
+    return {
+        "id": node.get("id", ""), "name": config.get("name", node.get("id", "未知协议")),
+        "enabled": node.get("enabled") is True, "ready": ready, "reason": reason, "port": config.get("port"),
+    }
+
+
 def enabled_protocols() -> list[dict[str, Any]]:
-    return [x for x in protocol_catalog()["nodes"] if x.get("enabled") is True and isinstance(x.get("config"), dict)]
+    return [x for x in protocol_catalog()["nodes"] if x.get("enabled") is True and protocol_ready(x)[0]]
 
 
 def save_protocol_catalog(value: dict[str, Any]) -> None:
@@ -155,6 +175,20 @@ def call_vpnctl(*args: str) -> str | None:
     if result.returncode:
         return (result.stderr or result.stdout or "vpnctl failed").strip()[:500]
     return None
+
+
+def vpnctl_json(*args: str) -> dict[str, Any]:
+    command = Path(VPNCTL)
+    if not command.exists():
+        return {"error": "诊断程序未安装"}
+    result = subprocess.run(["/usr/bin/sudo", "-n", str(command), *args], capture_output=True, text=True, timeout=20)
+    if result.returncode:
+        return {"error": (result.stderr or result.stdout or "诊断失败").strip()[:300]}
+    try:
+        value = json.loads(result.stdout)
+        return value if isinstance(value, dict) else {"error": "诊断数据格式错误"}
+    except json.JSONDecodeError:
+        return {"error": "诊断数据格式错误"}
 
 
 def allocate_ip(conn: sqlite3.Connection) -> str:
@@ -194,7 +228,7 @@ PersistentKeepalive = 25
 
 def flclash_subscription(row: sqlite3.Row) -> str:
     base_node = {
-        "name": "Hong Kong · WireGuard",
+        "name": f"{row['name']} · WireGuard",
         "type": "wireguard",
         "server": WG_ENDPOINT.rsplit(":", 1)[0],
         "port": int(WG_ENDPOINT.rsplit(":", 1)[1]),
@@ -369,8 +403,10 @@ def api(req: Request, start_response):
     conn = database()
     if req.path == "/api/health" and req.method == "GET":
         return json_response(start_response, HTTPStatus.OK, {"ok": True, "wireGuardEndpoint": WG_ENDPOINT, "protocols": len(enabled_protocols())})
+    if req.path == "/api/diagnostics" and req.method == "GET":
+        return json_response(start_response, HTTPStatus.OK, vpnctl_json("status"))
     if req.path == "/api/protocols" and req.method == "GET":
-        return json_response(start_response, HTTPStatus.OK, protocol_catalog())
+        return json_response(start_response, HTTPStatus.OK, {"nodes": [public_protocol(node) for node in protocol_catalog()["nodes"]]})
     if req.path.startswith("/api/protocols/") and req.method == "PATCH":
         protocol_id = req.path.rsplit("/", 1)[1]
         body = req.json()
@@ -380,9 +416,12 @@ def api(req: Request, start_response):
         node = next((x for x in catalog["nodes"] if x.get("id") == protocol_id), None)
         if not node:
             return json_response(start_response, HTTPStatus.NOT_FOUND, {"error": "protocol not found"})
+        ready, reason = protocol_ready(node)
+        if body["enabled"] and not ready:
+            return json_response(start_response, HTTPStatus.CONFLICT, {"error": f"不能启用：{reason}。请先部署服务器并填写 protocols.json。"})
         node["enabled"] = body["enabled"]
         save_protocol_catalog(catalog)
-        return json_response(start_response, HTTPStatus.OK, {"node": node})
+        return json_response(start_response, HTTPStatus.OK, {"node": public_protocol(node)})
     if req.path == "/api/devices" and req.method == "GET":
         rows = conn.execute("SELECT * FROM devices ORDER BY created_at DESC").fetchall()
         return json_response(start_response, HTTPStatus.OK, {"devices": [public_device(row) for row in rows]})
@@ -412,6 +451,12 @@ def api(req: Request, start_response):
         row = conn.execute("SELECT * FROM devices WHERE id=?", (device_id,)).fetchone()
         if not row:
             return json_response(start_response, HTTPStatus.NOT_FOUND, {"error": "device not found"})
+        if action == "" and req.method == "PATCH":
+            name = safe_name(str(req.json().get("name", "")))
+            conn.execute("UPDATE devices SET name=? WHERE id=?", (name, device_id))
+            conn.commit()
+            updated = conn.execute("SELECT * FROM devices WHERE id=?", (device_id,)).fetchone()
+            return json_response(start_response, HTTPStatus.OK, {"device": public_device(updated)})
         if action == "wireguard.conf" and req.method == "GET":
             # WSGI headers are Latin-1. Device names may be Chinese, so never put
             # them in Content-Disposition; the opaque ID is URL/header safe.
