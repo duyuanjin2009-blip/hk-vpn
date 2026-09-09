@@ -29,7 +29,9 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y python3 sudo wireguard wiregua
 id -u hkvpn >/dev/null 2>&1 || useradd --system --home "$data_dir" --shell /usr/sbin/nologin hkvpn
 install -d -m 700 -o hkvpn -g hkvpn "$data_dir"
 install -d -m 750 -o root -g hkvpn /etc/hk-vpn
-install -d -m 700 /etc/swanctl/conf.d /usr/local/libexec/hk-vpn
+install -d -m 700 /etc/swanctl/conf.d
+# hkvpn may stat the helper, but only sudo may execute it as root.
+install -d -m 711 /usr/local/libexec/hk-vpn
 install -d -m 755 "$install_dir"
 
 project_root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -129,6 +131,11 @@ install -m 644 "$install_dir/server/systemd/hk-vpn-panel.service" /etc/systemd/s
 install -m 644 "$install_dir/server/systemd/hk-vpn-reconcile.service" /etc/systemd/system/hk-vpn-reconcile.service
 systemctl daemon-reload
 systemctl enable --now wg-quick@wg0.service
+if systemctl cat strongswan-swanctl.service >/dev/null 2>&1; then
+  systemctl enable --now strongswan-swanctl.service
+else
+  systemctl enable --now strongswan-starter.service
+fi
 systemctl enable hk-vpn-reconcile.service
 systemctl enable --now hk-vpn-panel.service
 
