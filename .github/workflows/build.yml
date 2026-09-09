@@ -35,7 +35,9 @@ jobs:
         working-directory: android
         run: |
           apksigner_path="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          "$apksigner_path" verify --verbose app/build/outputs/apk/release/app-release.apk
+          while IFS= read -r apk; do
+            "$apksigner_path" verify --verbose "$apk"
+          done < <(find app/build/outputs/apk/release -type f -name '*.apk' | sort)
       - uses: actions/upload-artifact@v4
         with:
           name: hk-vpn-android-apk
