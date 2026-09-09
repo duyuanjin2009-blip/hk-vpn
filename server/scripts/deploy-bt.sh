@@ -38,7 +38,9 @@ project_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cp -a "$project_root/server" "$install_dir/"
 chmod 755 "$install_dir/server/scripts/vpnctl.py" "$install_dir/server/scripts/deploy-bt.sh" "$install_dir/server/scripts/configure-ikev2-cert.sh"
 install -m 700 "$install_dir/server/scripts/vpnctl.py" /usr/local/libexec/hk-vpn/vpnctl.py
-cp "$install_dir/server/scripts/protocols.example.json" /etc/hk-vpn/protocols.json
+# Keep optional nodes disabled by default, but render the real deployment
+# hostname so a future manual enablement never leaks the example domain.
+sed "s/vpn\.example\.com/$domain/g" "$install_dir/server/scripts/protocols.example.json" > /etc/hk-vpn/protocols.json
 chmod 660 /etc/hk-vpn/protocols.json
 chown root:hkvpn /etc/hk-vpn/protocols.json
 cat > /etc/sudoers.d/hk-vpn-panel <<'EOF'
