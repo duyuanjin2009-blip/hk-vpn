@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
 
         val frame = FrameLayout(this)
         frame.addView(root, FrameLayout.LayoutParams(if (wideScreen()) dp(560) else -1, -2).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL })
-        return ScrollView(this).apply { isFillViewport = true; addView(frame, ScrollView.LayoutParams(-1, -2)) }
+        return ScrollView(this).apply { isFillViewport = true; addView(frame, FrameLayout.LayoutParams(-1, -2)) }
     }
 
     private fun toggle() {
