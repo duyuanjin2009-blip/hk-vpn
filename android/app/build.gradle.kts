@@ -4,7 +4,7 @@ plugins {
 }
 
 android { namespace = "cc.duyuan.hkvpn"; compileSdk = 35
-    defaultConfig { applicationId = "cc.duyuan.hkvpn"; minSdk = 23; targetSdk = 35; versionCode = 3; versionName = "1.2.0" }
+    defaultConfig { applicationId = "cc.duyuan.hkvpn"; minSdk = 23; targetSdk = 35; versionCode = 4; versionName = "1.3.0" }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -15,6 +15,14 @@ android { namespace = "cc.duyuan.hkvpn"; compileSdk = 35
             // Personal-use default: emit an installable APK. Replace this with a
             // private release keystore before distributing it to other people.
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86_64")
+            isUniversalApk = true
         }
     }
 }
