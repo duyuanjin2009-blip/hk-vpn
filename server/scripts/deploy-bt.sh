@@ -36,8 +36,9 @@ install -d -m 755 "$install_dir"
 
 project_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cp -a "$project_root/server" "$install_dir/"
-chmod 755 "$install_dir/server/scripts/vpnctl.py" "$install_dir/server/scripts/deploy-bt.sh" "$install_dir/server/scripts/configure-ikev2-cert.sh" "$install_dir/server/scripts/update-panel.sh"
+chmod 755 "$install_dir/server/scripts/vpnctl.py" "$install_dir/server/scripts/wg-routing.sh" "$install_dir/server/scripts/deploy-bt.sh" "$install_dir/server/scripts/configure-ikev2-cert.sh" "$install_dir/server/scripts/update-panel.sh"
 install -m 700 "$install_dir/server/scripts/vpnctl.py" /usr/local/libexec/hk-vpn/vpnctl.py
+install -m 700 "$install_dir/server/scripts/wg-routing.sh" /usr/local/libexec/hk-vpn/wg-routing.sh
 # Keep optional nodes disabled by default, but render the real deployment
 # hostname so a future manual enablement never leaks the example domain.
 sed "s/vpn\.example\.com/$domain/g" "$install_dir/server/scripts/protocols.example.json" > /etc/hk-vpn/protocols.json
@@ -52,17 +53,13 @@ visudo -cf /etc/sudoers.d/hk-vpn-panel >/dev/null
 
 server_private="$(wg genkey)"
 server_public="$(printf '%s\n' "$server_private" | wg pubkey)"
-wan_if="$(ip -4 route list default | awk '/dev/ {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
-[ -n "$wan_if" ] || wan_if="$(ip -o -4 addr show scope global | awk 'NR==1{print $2}')"
-[ -n "$wan_if" ] || { echo "Could not detect WAN interface"; exit 1; }
-
 cat > /etc/wireguard/wg0.conf <<EOF
 [Interface]
 Address = 10.88.0.1/24
 ListenPort = 51820
 PrivateKey = $server_private
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -A FORWARD -s 10.89.0.0/24 -j ACCEPT; iptables -A FORWARD -d 10.89.0.0/24 -j ACCEPT; iptables -t nat -A POSTROUTING -o $wan_if -j MASQUERADE; iptables -t nat -A POSTROUTING -s 10.89.0.0/24 -o $wan_if -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -D FORWARD -s 10.89.0.0/24 -j ACCEPT; iptables -D FORWARD -d 10.89.0.0/24 -j ACCEPT; iptables -t nat -D POSTROUTING -o $wan_if -j MASQUERADE; iptables -t nat -D POSTROUTING -s 10.89.0.0/24 -o $wan_if -j MASQUERADE
+PostUp = /usr/local/libexec/hk-vpn/wg-routing.sh up %i
+PostDown = /usr/local/libexec/hk-vpn/wg-routing.sh down %i
 EOF
 chmod 600 /etc/wireguard/wg0.conf
 cat > /etc/sysctl.d/99-hk-vpn.conf <<EOF
@@ -136,6 +133,10 @@ systemctl daemon-reload
 # written PostUp rules (forwarding and NAT) are always applied.
 systemctl enable wg-quick@wg0.service
 systemctl restart wg-quick@wg0.service
+if ! /usr/local/libexec/hk-vpn/wg-routing.sh up wg0; then
+  echo "WireGuard routing verification failed" >&2
+  exit 1
+fi
 if systemctl cat strongswan-swanctl.service >/dev/null 2>&1; then
   systemctl enable --now strongswan-swanctl.service
 else
