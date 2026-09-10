@@ -36,7 +36,17 @@ function trafficHistoryView(history) {
   return `<div class="history-controls"><button class="minor" data-traffic-range="24h">24 小时</button><button class="minor" data-traffic-range="7d">7 天</button><button class="minor" data-traffic-range="30d">30 天</button></div><p class="history-total">${history.range === "24h" ? "近 24 小时" : history.range}：↑ ${formatBytes(history.clientToServerBytes)}　↓ ${formatBytes(history.serverToClientBytes)}</p><div class="traffic-bars" aria-label="流量记录柱状图">${bars || '<span>等待更多样本</span>'}</div><p class="hint">${history.sampleCount} 个样本；柱形表示每段记录的总流量，非实时速度。</p>`;
 }
 function downloadConfig(text, filename) {
-  const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([text], {type:"text/plain"})); link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0);
+  // Android download managers may read a Blob URL after the click handler has
+  // returned.  Do not revoke it immediately, or a valid .conf can be saved as
+  // an empty/truncated file and WireGuard reports it as invalid.
+  const url = URL.createObjectURL(new Blob([text], {type: "text/plain;charset=utf-8"}));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => { link.remove(); URL.revokeObjectURL(url); }, 60000);
 }
 function connectionView(connection) {
   const state = connection?.state || "unknown";
@@ -58,7 +68,7 @@ function renderDiagnostics(data) {
     diagnostic(`UDP ${data.wireguardListenPort || "?"}`, data.wireguardPort, "服务器正在监听", "服务器未监听"),
     diagnostic("IPv4 转发", data.ipForward, "已开启", "未开启"),
     diagnostic("转发规则", data.forwardRules, "wg0 规则正常", "缺少 wg0 规则"),
-    diagnostic("NAT 出口", data.nat, "MASQUERADE 正常", "缺少 NAT"),
+    diagnostic(`NAT 出口 ${data.wanInterface || "?"}`, data.nat, "MASQUERADE 正常", "缺少 NAT"),
     diagnostic("IKEv2", data.strongSwan, "StrongSwan 运行中", "服务未运行"),
   ].join("");
 }
