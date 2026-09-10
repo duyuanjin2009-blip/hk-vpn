@@ -43,7 +43,7 @@ VPNCTL = os.environ.get("HKVPN_CTL", "/usr/local/libexec/hk-vpn/vpnctl.py")
 STATIC_DIR = Path(__file__).with_name("static")
 SAFE_SYSTEMD_UNIT = re.compile(r"^[A-Za-z0-9@_.:-]{1,128}$")
 FLCLASH_UNSUPPORTED_TYPES = {"openvpn"}
-APP_VERSION = "2026.09.10-traffic"
+APP_VERSION = "2026.09.10-routing-v2"
 TRAFFIC_RETENTION_SECONDS = 31 * 24 * 60 * 60
 TRAFFIC_SAMPLE_MIN_SECONDS = 60
 TRAFFIC_SAMPLER_SECONDS = 300
@@ -377,6 +377,7 @@ def public_diagnostics(status: dict[str, Any]) -> dict[str, Any]:
         "wireguardInterface": status.get("wireguardInterface") is True,
         "wireguardListenPort": status.get("wireguardListenPort"),
         "wireguardPort": status.get("wireguardPort") is True,
+        "wanInterface": status.get("wanInterface"),
         "ipForward": status.get("ipForward") is True,
         "forwardRules": status.get("forwardRules") is True,
         "nat": status.get("nat") is True,
@@ -521,6 +522,15 @@ def flclash_subscription(row: sqlite3.Row) -> str:
         "mode": "rule",
         "log-level": "warning",
         "ipv6": False,
+        # A standalone subscription must include DNS for Android TUN mode.
+        # Without it, a node delay test can pass while normal apps cannot
+        # resolve host names through the tunnel.
+        "dns": {
+            "enable": True,
+            "ipv6": False,
+            "enhanced-mode": "redir-host",
+            "nameserver": DNS_SERVERS,
+        },
         "tun": {"enable": True, "stack": "mixed", "auto-route": True, "auto-detect-interface": True, "dns-hijack": ["any:53"]},
         "proxies": nodes,
         "proxy-groups": [
