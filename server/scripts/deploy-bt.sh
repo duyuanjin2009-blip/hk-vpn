@@ -24,7 +24,7 @@ done
 command -v bt >/dev/null 2>&1 || echo "Warning: Baota command was not found. Continue only if Baota/Nginx is installed another way."
 
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y python3 sudo wireguard wireguard-tools iptables strongswan-swanctl strongswan-charon strongswan-pki libcharon-extra-plugins qrencode curl
+DEBIAN_FRONTEND=noninteractive apt-get install -y python3 sudo iproute2 wireguard wireguard-tools iptables strongswan-swanctl strongswan-charon strongswan-pki libcharon-extra-plugins qrencode curl
 
 id -u hkvpn >/dev/null 2>&1 || useradd --system --home "$data_dir" --shell /usr/sbin/nologin hkvpn
 install -d -m 700 -o hkvpn -g hkvpn "$data_dir"
@@ -36,7 +36,7 @@ install -d -m 755 "$install_dir"
 
 project_root="$(cd "$(dirname "$0")/../.." && pwd)"
 cp -a "$project_root/server" "$install_dir/"
-chmod 755 "$install_dir/server/scripts/vpnctl.py" "$install_dir/server/scripts/deploy-bt.sh" "$install_dir/server/scripts/configure-ikev2-cert.sh"
+chmod 755 "$install_dir/server/scripts/vpnctl.py" "$install_dir/server/scripts/deploy-bt.sh" "$install_dir/server/scripts/configure-ikev2-cert.sh" "$install_dir/server/scripts/update-panel.sh"
 install -m 700 "$install_dir/server/scripts/vpnctl.py" /usr/local/libexec/hk-vpn/vpnctl.py
 # Keep optional nodes disabled by default, but render the real deployment
 # hostname so a future manual enablement never leaks the example domain.
@@ -132,7 +132,7 @@ chmod 600 /etc/swanctl/conf.d/hk-vpn-users.conf
 install -m 644 "$install_dir/server/systemd/hk-vpn-panel.service" /etc/systemd/system/hk-vpn-panel.service
 install -m 644 "$install_dir/server/systemd/hk-vpn-reconcile.service" /etc/systemd/system/hk-vpn-reconcile.service
 systemctl daemon-reload
-# A previous installation may already have wg0 active. Restart so the newly
+# A previous installation may already have wg0 active.  Restart so the newly
 # written PostUp rules (forwarding and NAT) are always applied.
 systemctl enable wg-quick@wg0.service
 systemctl restart wg-quick@wg0.service

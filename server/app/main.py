@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -39,6 +40,7 @@ WG_NETWORK = os.environ.get("HKVPN_WG_NETWORK", "10.88.0")
 DNS_SERVERS = [x.strip() for x in os.environ.get("HKVPN_DNS", "1.1.1.1,1.0.0.1").split(",") if x.strip()]
 VPNCTL = os.environ.get("HKVPN_CTL", "/usr/local/libexec/hk-vpn/vpnctl.py")
 STATIC_DIR = Path(__file__).with_name("static")
+SAFE_SYSTEMD_UNIT = re.compile(r"^[A-Za-z0-9@_.:-]{1,128}$")
 
 
 def now() -> int:
@@ -54,7 +56,10 @@ def b64(value: bytes) -> str:
 
 
 def safe_name(value: str) -> str:
-    value = "".join(ch for ch in value.strip() if ch.isalnum() or ch in " -_.")[:64]
+    # Names are rendered through YAML/HTML escaping and never put into response
+    # headers, so permit normal Chinese punctuation and emoji.  Only control
+    # characters are removed.
+    value = "".join(ch for ch in value.strip() if ch.isprintable() and ch not in "\r\n\t")[:64]
     return value or "My device"
 
 
@@ -113,7 +118,7 @@ def database() -> sqlite3.Connection:
 
 def wg_keypair() -> tuple[str, str]:
     """Use real wg tooling in production; provide a clearly non-production fallback for tests."""
-    # The control helper is installed by deploy-bt.sh. Requiring it here keeps
+    # The control helper is installed by deploy-bt.sh.  Requiring it here keeps
     # development/CI deterministic on runners which happen to have `wg`, while
     # production continues to generate genuine WireGuard keys.
     if os.environ.get("HKVPN_TEST_MODE") != "1" and shutil.which("wg") and Path(VPNCTL).exists():
@@ -142,20 +147,99 @@ def protocol_ready(node: dict[str, Any]) -> tuple[bool, str | None]:
     raw = json.dumps(config, ensure_ascii=False)
     if "REPLACE_WITH_" in raw or "vpn.example.com" in raw:
         return False, "尚未填写真实域名、密码或 UUID"
+    protocol_type = str(config.get("type", ""))
+    common = ("name", "server", "port", "service")
+    required = {
+        "hysteria2": ("password", "sni"),
+        "tuic": ("uuid", "password"),
+        "ss": ("cipher", "password"),
+        "vless": ("uuid", "network"),
+        "trojan": ("password", "sni"),
+        # Mihomo requires a CA plus either username/password or cert/key for
+        # OpenVPN. A bare endpoint must never be treated as usable.
+        "openvpn": ("ca",),
+    }
+    if protocol_type not in required:
+        return False, "不支持的 FLClash 协议类型"
+    missing = [key for key in (*common, *required[protocol_type]) if not config.get(key)]
+    if protocol_type == "openvpn" and not ((config.get("username") and config.get("password")) or (config.get("cert") and config.get("key"))):
+        missing.append("认证信息")
+    try:
+        port = int(config.get("port", 0))
+    except (TypeError, ValueError):
+        port = 0
+    if not 1 <= port <= 65535:
+        missing.append("有效端口")
+    if missing:
+        return False, "缺少 " + "、".join(missing)
     return True, None
 
 
-def public_protocol(node: dict[str, Any]) -> dict[str, Any]:
+def protocol_transports(config: dict[str, Any]) -> tuple[str, ...]:
+    protocol_type = config.get("type")
+    if protocol_type in {"hysteria2", "tuic"}:
+        return ("udp",)
+    if protocol_type == "ss":
+        return ("tcp", "udp")
+    if protocol_type == "openvpn":
+        return ("udp",) if config.get("udp") is not False else ("tcp",)
+    return ("tcp",)
+
+
+def protocol_runtime_ready(node: dict[str, Any], status: dict[str, Any]) -> tuple[bool, str | None]:
     ready, reason = protocol_ready(node)
+    if not ready:
+        return False, reason
+    if status.get("error"):
+        return False, "无法读取服务器端口状态"
+    config = node["config"]
+    try:
+        port = int(config["port"])
+    except (KeyError, TypeError, ValueError):
+        return False, "端口配置无效"
+    listening = {
+        "tcp": set(status.get("tcpListeningPorts", [])),
+        "udp": set(status.get("udpListeningPorts", [])),
+    }
+    missing = [transport.upper() for transport in protocol_transports(config) if port not in listening[transport]]
+    if missing:
+        return False, "服务器未监听 " + "/".join(missing) + f" {port}"
+    service = str(config.get("service", ""))
+    if not SAFE_SYSTEMD_UNIT.fullmatch(service):
+        return False, "服务名称格式无效"
+    services = status.get("services")
+    if not isinstance(services, dict) or services.get(service) is not True:
+        return False, f"服务未运行：{service}"
+    return True, None
+
+
+def public_protocol(node: dict[str, Any], status: dict[str, Any] | None = None) -> dict[str, Any]:
+    configured, config_reason = protocol_ready(node)
+    ready, reason = protocol_runtime_ready(node, status) if status is not None else (configured, config_reason)
     config = node.get("config") if isinstance(node.get("config"), dict) else {}
     return {
         "id": node.get("id", ""), "name": config.get("name", node.get("id", "未知协议")),
-        "enabled": node.get("enabled") is True, "ready": ready, "reason": reason, "port": config.get("port"),
+        "enabled": node.get("enabled") is True, "configured": configured,
+        "ready": ready, "reason": reason, "port": config.get("port"),
     }
 
 
-def enabled_protocols() -> list[dict[str, Any]]:
-    return [x for x in protocol_catalog()["nodes"] if x.get("enabled") is True and protocol_ready(x)[0]]
+def enabled_protocols(status: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    nodes = [x for x in protocol_catalog()["nodes"] if x.get("enabled") is True]
+    if status is None:
+        return [x for x in nodes if protocol_ready(x)[0]]
+    return [x for x in nodes if protocol_runtime_ready(x, status)[0]]
+
+
+def protocol_runtime_status() -> dict[str, Any]:
+    services = []
+    for node in protocol_catalog()["nodes"]:
+        config = node.get("config")
+        service = str(config.get("service", "")) if isinstance(config, dict) else ""
+        if SAFE_SYSTEMD_UNIT.fullmatch(service) and service not in services:
+            services.append(service)
+    args = [part for service in services for part in ("--service", service)]
+    return vpnctl_json("status", *args)
 
 
 def save_protocol_catalog(value: dict[str, Any]) -> None:
@@ -171,7 +255,12 @@ def call_vpnctl(*args: str) -> str | None:
     command = Path(VPNCTL)
     if not command.exists():
         return "Root helper is not installed yet; run deploy-bt.sh then click Reconcile."
-    result = subprocess.run(["/usr/bin/sudo", "-n", str(command), *args], capture_output=True, text=True, timeout=20)
+    try:
+        result = subprocess.run(["/usr/bin/sudo", "-n", str(command), *args], capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        return "服务器操作超时，请稍后重试"
+    except OSError as exc:
+        return f"无法执行服务器操作：{exc.strerror or exc}"
     if result.returncode:
         return (result.stderr or result.stdout or "vpnctl failed").strip()[:500]
     return None
@@ -181,7 +270,12 @@ def vpnctl_json(*args: str) -> dict[str, Any]:
     command = Path(VPNCTL)
     if not command.exists():
         return {"error": "诊断程序未安装"}
-    result = subprocess.run(["/usr/bin/sudo", "-n", str(command), *args], capture_output=True, text=True, timeout=20)
+    try:
+        result = subprocess.run(["/usr/bin/sudo", "-n", str(command), *args], capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        return {"error": "诊断操作超时"}
+    except OSError as exc:
+        return {"error": f"无法执行诊断：{exc.strerror or exc}"}
     if result.returncode:
         return {"error": (result.stderr or result.stdout or "诊断失败").strip()[:300]}
     try:
@@ -200,13 +294,67 @@ def allocate_ip(conn: sqlite3.Connection) -> str:
     raise RuntimeError("WireGuard address pool is full")
 
 
-def public_device(row: sqlite3.Row) -> dict[str, Any]:
+def connection_for(row: sqlite3.Row, status: dict[str, Any]) -> dict[str, Any]:
+    """Translate `wg dump` counters into a clear, server-side device state."""
+    if status.get("error"):
+        return {"state": "unknown", "reason": "服务器暂时无法读取 WireGuard 状态"}
+    if "wireguardInterface" in status and status.get("wireguardInterface") is not True:
+        return {"state": "unknown", "reason": "服务器的 wg0 接口未启动"}
+    peers = status.get("peers")
+    if not isinstance(peers, list):
+        return {"state": "unknown", "reason": "WireGuard 状态格式异常"}
+    peer = next((item for item in peers if isinstance(item, dict) and item.get("publicKey") == row["wg_public_key"]), None)
+    if not peer:
+        return {"state": "not-provisioned", "reason": "服务器尚未找到此设备的 Peer"}
+    try:
+        handshake = int(peer.get("latestHandshake", 0))
+        received = max(0, int(peer.get("receivedBytes", 0)))
+        sent = max(0, int(peer.get("sentBytes", 0)))
+    except (TypeError, ValueError):
+        return {"state": "unknown", "reason": "WireGuard 统计数据异常"}
+    if handshake <= 0:
+        return {
+            "state": "waiting", "reason": "等待首次握手；手机刚连接时通常需要数秒",
+            "clientToServerBytes": received, "serverToClientBytes": sent,
+        }
+    age = max(0, now() - handshake)
     return {
+        "state": "connected" if age <= 180 else "idle",
+        "lastHandshakeAt": handshake, "handshakeAgeSeconds": age,
+        # Direction labels intentionally use the client perspective. They are
+        # cumulative WireGuard counters, not a real-time speed test.
+        "clientToServerBytes": received,
+        "serverToClientBytes": sent,
+    }
+
+
+def public_device(row: sqlite3.Row, connection: dict[str, Any] | None = None) -> dict[str, Any]:
+    value = {
         "id": row["id"], "name": row["name"], "platform": row["platform"],
         "createdAt": row["created_at"], "revokedAt": row["revoked_at"],
         "wireGuardIp": row["wg_ip"], "ikev2Username": row["ike_username"],
         "subscriptionUrl": f"{PUBLIC_URL}/sub/{row['subscription_token']}.yaml",
         "provisionError": row["provision_error"],
+    }
+    if connection is not None:
+        value["connection"] = connection
+    return value
+
+
+def public_diagnostics(status: dict[str, Any]) -> dict[str, Any]:
+    """Keep peer public keys and internal endpoint data out of the browser."""
+    if status.get("error"):
+        return {"error": status["error"]}
+    return {
+        "wireguardInterface": status.get("wireguardInterface") is True,
+        "wireguardListenPort": status.get("wireguardListenPort"),
+        "wireguardPort": status.get("wireguardPort") is True,
+        "ipForward": status.get("ipForward") is True,
+        "forwardRules": status.get("forwardRules") is True,
+        "nat": status.get("nat") is True,
+        "strongSwan": status.get("strongSwan") is True,
+        "peerCount": len(status.get("peers", [])) if isinstance(status.get("peers"), list) else 0,
+        "checkedAt": status.get("checkedAt"),
     }
 
 
@@ -240,7 +388,11 @@ def flclash_subscription(row: sqlite3.Row) -> str:
         "mtu": 1380,
         "persistent-keepalive": 25,
     }
-    nodes = [base_node] + [x["config"] for x in enabled_protocols()]
+    # Never return an enabled-but-stopped advanced service in a subscription.
+    # WireGuard remains available as the reliable fallback if a diagnostic call
+    # itself fails.
+    runtime_status = protocol_runtime_status()
+    nodes = [base_node] + [x["config"] for x in enabled_protocols(runtime_status)]
     names = [x.get("name", "Unnamed") for x in nodes]
     document: dict[str, Any] = {
         "mixed-port": 7890,
@@ -404,9 +556,10 @@ def api(req: Request, start_response):
     if req.path == "/api/health" and req.method == "GET":
         return json_response(start_response, HTTPStatus.OK, {"ok": True, "wireGuardEndpoint": WG_ENDPOINT, "protocols": len(enabled_protocols())})
     if req.path == "/api/diagnostics" and req.method == "GET":
-        return json_response(start_response, HTTPStatus.OK, vpnctl_json("status"))
+        return json_response(start_response, HTTPStatus.OK, public_diagnostics(vpnctl_json("status")))
     if req.path == "/api/protocols" and req.method == "GET":
-        return json_response(start_response, HTTPStatus.OK, {"nodes": [public_protocol(node) for node in protocol_catalog()["nodes"]]})
+        runtime_status = protocol_runtime_status()
+        return json_response(start_response, HTTPStatus.OK, {"nodes": [public_protocol(node, runtime_status) for node in protocol_catalog()["nodes"]]})
     if req.path.startswith("/api/protocols/") and req.method == "PATCH":
         protocol_id = req.path.rsplit("/", 1)[1]
         body = req.json()
@@ -416,15 +569,21 @@ def api(req: Request, start_response):
         node = next((x for x in catalog["nodes"] if x.get("id") == protocol_id), None)
         if not node:
             return json_response(start_response, HTTPStatus.NOT_FOUND, {"error": "protocol not found"})
-        ready, reason = protocol_ready(node)
+        runtime_status = protocol_runtime_status()
+        ready, reason = protocol_runtime_ready(node, runtime_status)
         if body["enabled"] and not ready:
-            return json_response(start_response, HTTPStatus.CONFLICT, {"error": f"不能启用：{reason}。请先部署服务器并填写 protocols.json。"})
+            return json_response(start_response, HTTPStatus.CONFLICT, {"error": f"不能启用：{reason}。请先部署服务、填写 protocols.json，并确认本机端口正在监听。"})
         node["enabled"] = body["enabled"]
         save_protocol_catalog(catalog)
-        return json_response(start_response, HTTPStatus.OK, {"node": public_protocol(node)})
+        return json_response(start_response, HTTPStatus.OK, {"node": public_protocol(node, runtime_status)})
     if req.path == "/api/devices" and req.method == "GET":
         rows = conn.execute("SELECT * FROM devices ORDER BY created_at DESC").fetchall()
-        return json_response(start_response, HTTPStatus.OK, {"devices": [public_device(row) for row in rows]})
+        wireguard_status = vpnctl_json("status")
+        return json_response(start_response, HTTPStatus.OK, {
+            "devices": [public_device(row, connection_for(row, wireguard_status)) for row in rows],
+            "checkedAt": wireguard_status.get("checkedAt"),
+            "connectionError": wireguard_status.get("error"),
+        })
     if req.path == "/api/devices" and req.method == "POST":
         body = req.json()
         name = safe_name(str(body.get("name", "")))

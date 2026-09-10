@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -20,6 +21,7 @@ _protocol_file = Path(tempfile.mkdtemp(prefix="hkvpn-protocols-")) / "protocols.
 _protocol_file.write_text(json.dumps({"nodes": [{"id": "hysteria2", "enabled": False, "config": {"name": "HK Hysteria2", "server": "vpn.example.com", "password": "REPLACE_WITH_PASSWORD"}}]}))
 os.environ["HKVPN_PROTOCOLS_FILE"] = str(_protocol_file)
 
+from app import main  # noqa: E402
 from app.main import application  # noqa: E402
 
 
@@ -36,6 +38,9 @@ def request(path, method="GET", body=None, cookie=""):
 
 
 class PanelTests(unittest.TestCase):
+    def setUp(self):
+        _protocol_file.write_text(json.dumps({"nodes": [{"id": "hysteria2", "enabled": False, "config": {"name": "HK Hysteria2", "server": "vpn.example.com", "password": "REPLACE_WITH_PASSWORD"}}]}))
+
     def test_native_enrollment_and_subscription(self):
         response, body = request("/api/client/enroll", "POST", {"password": "test-password", "clientId": "client-testing-001", "platform": "Android"})
         self.assertTrue(response["status"].startswith("200"))
@@ -80,6 +85,42 @@ class PanelTests(unittest.TestCase):
         self.assertTrue(response["status"].startswith("200"))
         response, body = request(device["subscriptionUrl"].replace("https://panel.test", ""))
         self.assertIn("我的香港节点 · WireGuard".encode(), body)
+
+    def test_connection_status_uses_server_side_directional_counters(self):
+        response, _ = request("/login", "POST", b"password=test-password")
+        cookie = response["headers"]["Set-Cookie"].split(";", 1)[0]
+        response, body = request("/api/devices", "POST", {"name": "状态测试", "platform": "FLClash"}, cookie)
+        device = json.loads(body)["device"]
+        row = main.database().execute("SELECT * FROM devices WHERE id=?", (device["id"],)).fetchone()
+        status = {"checkedAt": main.now(), "peers": [{"publicKey": row["wg_public_key"], "latestHandshake": main.now() - 5, "receivedBytes": 1234, "sentBytes": 5678}]}
+        with patch("app.main.vpnctl_json", return_value=status):
+            response, body = request("/api/devices", cookie=cookie)
+        listed = next(item for item in json.loads(body)["devices"] if item["id"] == device["id"])
+        self.assertEqual(listed["connection"]["state"], "connected")
+        self.assertEqual(listed["connection"]["clientToServerBytes"], 1234)
+        self.assertEqual(listed["connection"]["serverToClientBytes"], 5678)
+
+    def test_protocol_requires_local_listener_before_enable(self):
+        _protocol_file.write_text(json.dumps({"nodes": [{"id": "hysteria2", "enabled": False, "config": {"name": "HK Hysteria2", "type": "hysteria2", "server": "vpn.test", "port": 8443, "service": "hysteria-server.service", "password": "real-password", "sni": "vpn.test"}}]}))
+        response, _ = request("/login", "POST", b"password=test-password")
+        cookie = response["headers"]["Set-Cookie"].split(";", 1)[0]
+        no_listener = {"udpListeningPorts": [], "tcpListeningPorts": []}
+        with patch("app.main.vpnctl_json", return_value=no_listener):
+            response, _ = request("/api/protocols/hysteria2", "PATCH", {"enabled": True}, cookie)
+        self.assertTrue(response["status"].startswith("409"))
+        listener = {"udpListeningPorts": [8443], "tcpListeningPorts": [], "services": {"hysteria-server.service": True}}
+        with patch("app.main.vpnctl_json", return_value=listener):
+            response, _ = request("/api/protocols/hysteria2", "PATCH", {"enabled": True}, cookie)
+        self.assertTrue(response["status"].startswith("200"))
+
+    def test_wireguard_dump_parser_keeps_counter_directions(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        import vpnctl
+        dump = "private\tpublic\t51820\t0\npeer-key\t(none)\t198.51.100.2:4567\t10.88.0.2/32\t123\t456\t789\t25\n"
+        port, peers = vpnctl.parse_wireguard_dump(dump)
+        self.assertEqual(port, 51820)
+        self.assertEqual(peers, [{"publicKey": "peer-key", "latestHandshake": 123, "receivedBytes": 456, "sentBytes": 789}])
+        self.assertEqual(vpnctl.listening_ports("UNCONN 0 0 0.0.0.0:51820 0.0.0.0:*\n"), {51820})
 
 
 if __name__ == "__main__":

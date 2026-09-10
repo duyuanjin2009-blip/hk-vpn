@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 STATE_DIR = Path("/etc/hk-vpn")
@@ -24,6 +25,7 @@ WG_INTERFACE = os.environ.get("HKVPN_WG_INTERFACE", "wg0")
 WG_SUBNET = ipaddress.ip_network(os.environ.get("HKVPN_WG_SUBNET", "10.88.0.0/24"))
 SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
 SAFE_USER = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
+SAFE_SYSTEMD_UNIT = re.compile(r"^[A-Za-z0-9@_.:-]{1,128}$")
 
 
 def command(*args: str) -> None:
@@ -31,7 +33,55 @@ def command(*args: str) -> None:
 
 
 def command_output(*args: str) -> str:
-    return subprocess.run(args, check=False, timeout=15, capture_output=True, text=True).stdout
+    try:
+        return subprocess.run(args, check=False, timeout=15, capture_output=True, text=True).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def parse_wireguard_dump(dump: str) -> tuple[int | None, list[dict[str, int | str]]]:
+    """Parse `wg show <interface> dump` without exposing private keys.
+
+    The transfer counters are from the server perspective: receivedBytes is
+    traffic sent by the client, while sentBytes is traffic sent to the client.
+    """
+    lines = [line.split("\t") for line in dump.splitlines() if line.strip()]
+    if not lines:
+        return None, []
+    try:
+        listen_port = int(lines[0][2])
+    except (IndexError, ValueError):
+        listen_port = None
+    peers: list[dict[str, int | str]] = []
+    for fields in lines[1:]:
+        if len(fields) < 8:
+            continue
+        try:
+            peers.append({
+                "publicKey": fields[0],
+                "latestHandshake": int(fields[4]),
+                "receivedBytes": int(fields[5]),
+                "sentBytes": int(fields[6]),
+            })
+        except ValueError:
+            continue
+    return listen_port, peers
+
+
+def listening_ports(output: str) -> set[int]:
+    ports: set[int] = set()
+    for match in re.finditer(r":(\d+)(?:\s|$)", output):
+        try:
+            port = int(match.group(1))
+            if 1 <= port <= 65535:
+                ports.add(port)
+        except ValueError:
+            continue
+    return ports
+
+
+def active(*units: str) -> bool:
+    return any(subprocess.run(["systemctl", "is-active", "--quiet", unit], check=False).returncode == 0 for unit in units)
 
 
 def read_state() -> dict[str, dict[str, str]]:
@@ -122,18 +172,31 @@ def reconcile(_: argparse.Namespace) -> None:
     write_ike_secrets(state)
 
 
-def status(_: argparse.Namespace) -> None:
+def status(args: argparse.Namespace) -> None:
     """Return non-secret service checks for the web dashboard."""
+    services = list(dict.fromkeys(args.service or []))
+    if any(not SAFE_SYSTEMD_UNIT.fullmatch(unit) for unit in services):
+        raise SystemExit("Invalid systemd service name")
+    wireguard_dump = command_output("wg", "show", WG_INTERFACE, "dump")
+    listen_port, peers = parse_wireguard_dump(wireguard_dump)
     listeners = command_output("ss", "-H", "-l", "-n", "-u")
+    tcp_listeners = command_output("ss", "-H", "-l", "-n", "-t")
     nat_rules = command_output("iptables", "-t", "nat", "-S", "POSTROUTING")
+    forward_rules = command_output("iptables", "-S", "FORWARD")
     forwarding = Path("/proc/sys/net/ipv4/ip_forward").read_text().strip() == "1"
     print(json.dumps({
         "wireguardInterface": Path(f"/sys/class/net/{WG_INTERFACE}").exists(),
-        "wireguardPort": bool(re.search(r"(?:\\[::\\]|0\\.0\\.0\\.0):51820\\b", listeners)),
+        "wireguardListenPort": listen_port,
+        "wireguardPort": bool(listen_port and re.search(rf"(?:\[::\]|0\.0\.0\.0):{listen_port}(?!\d)", listeners)),
         "ipForward": forwarding,
         "nat": "MASQUERADE" in nat_rules,
-        "strongSwan": subprocess.run(["systemctl", "is-active", "--quiet", "strongswan-swanctl.service"], check=False).returncode == 0
-            or subprocess.run(["systemctl", "is-active", "--quiet", "strongswan-starter.service"], check=False).returncode == 0,
+        "forwardRules": f"-A FORWARD -i {WG_INTERFACE}" in forward_rules and f"-A FORWARD -o {WG_INTERFACE}" in forward_rules,
+        "strongSwan": active("strongswan-swanctl.service", "strongswan-starter.service"),
+        "checkedAt": int(time.time()),
+        "peers": peers,
+        "tcpListeningPorts": sorted(listening_ports(tcp_listeners)),
+        "udpListeningPorts": sorted(listening_ports(listeners)),
+        "services": {unit: active(unit) for unit in services},
     }, separators=(",", ":")))
 
 
@@ -145,7 +208,7 @@ def main() -> None:
     add.add_argument("--ike-user", required=True); add.add_argument("--ike-password", required=True); add.set_defaults(func=add_device)
     remove = sub.add_parser("remove-device"); remove.add_argument("--id", required=True); remove.set_defaults(func=remove_device)
     reconcile_cmd = sub.add_parser("reconcile"); reconcile_cmd.set_defaults(func=reconcile)
-    status_cmd = sub.add_parser("status"); status_cmd.set_defaults(func=status)
+    status_cmd = sub.add_parser("status"); status_cmd.add_argument("--service", action="append", default=[]); status_cmd.set_defaults(func=status)
     args = parser.parse_args(); args.func(args)
 
 

@@ -99,9 +99,16 @@ journalctl -u strongswan-swanctl -n 100 --no-pager
 
 控制台详情复制 `subscriptionUrl`。FLClash 添加 URL 配置后，选择节点并打开客户端的 VPN/TUN 功能。默认只有 WireGuard 节点；不要在协议服务没部署前启用 JSON 中的可选节点。控制台设备卡片的“改节点名”会更新订阅里的 WireGuard 节点名；FLClash 自己显示的订阅配置标题仍可能需要在 FLClash 内重命名。
 
+连接后点击网页的“刷新状态”。设备卡片会明确显示：
+
+- **正在建立隧道**：服务端尚未看到首次 WireGuard 握手；刚打开 FLClash 时可等待数秒。
+- **已双向连通**：最近 3 分钟内存在握手。
+- **当前没有活动**：配置仍在，但超过 3 分钟没有新握手。
+- **手机 → 服务器 / 服务器 → 手机**：这是服务端的累计 WireGuard 字节方向，**不是实时网速**，不可用来判断刚连接瞬间的速度。
+
 ## 5. 启用附加 FLClash 协议
 
-每一种协议都必须先部署对应服务、替换 `protocols.json` 的示例密码/UUID/域名、用独立客户端测试成功，最后才将该模块的 `enabled` 改为 `true`。修改后刷新 FLClash 订阅即可。
+每一种协议都必须先部署对应服务、替换 `protocols.json` 的示例密码/UUID/域名和 `service`（真实 systemd 单元名）、用独立客户端测试成功，最后才将该模块的 `enabled` 改为 `true`。网页会同时检查对应 TCP/UDP 端口是否正由本机监听，以及该 systemd 服务是否在运行；两项任一失败，节点不能开启，已开启后服务停止时会自动从订阅隐藏，WireGuard 节点仍会保留。
 
 对 443/TCP 上的 VLESS、Trojan 和网页 HTTPS，必须使用 Nginx stream/SNI 分流或独立端口；不要让两个程序直接争抢同一个端口。对 Hysteria2 若使用 UDP 443，则不要让 Nginx 启用 HTTP/3；默认 UDP 8443 可避免冲突。
 
@@ -119,7 +126,7 @@ chmod +x server/scripts/update-panel.sh
 systemctl status hk-vpn-panel --no-pager
 ```
 
-刷新浏览器后可看到“服务状态与端口检测”。它会显示 WireGuard 接口、UDP 51820 监听、IPv4 转发、NAT 规则和 StrongSwan 服务的服务器侧状态；它不能替代外网 UDP 实测。
+刷新浏览器后可看到“服务状态与端口检测”。它会显示 WireGuard 接口和实际 UDP 监听端口、IPv4 转发、wg0 转发规则、NAT 规则、StrongSwan 服务以及每设备的握手状态；它不能替代外网 UDP 实测。
 
 ## 7. 回滚
 

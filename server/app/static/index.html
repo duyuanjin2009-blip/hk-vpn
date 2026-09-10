@@ -7,7 +7,8 @@
 <body>
   <header><div><p class="eyebrow">PERSONAL NETWORK</p><h1>HK VPN Suite</h1><p id="status">正在读取服务器状态…</p></div><form method="post" action="/logout"><button class="secondary">退出</button></form></header>
   <main>
-    <section class="hero"><div><p class="eyebrow">PRIMARY CONNECTION</p><h2>FLClash 主连接</h2><p>新建设备后复制订阅 URL 到 FLClash；WireGuard 配置和 IKEv2 仅作为备用连接。</p></div><button id="new-device">新增设备</button></section><section><div class="section-title"><h2>服务器状态</h2><p>自动检查监听端口、转发与 NAT；不显示任何密钥或密码。</p></div><div id="diagnostics" class="diagnostic-grid"></div></section>
+    <section class="hero"><div><p class="eyebrow">PRIMARY CONNECTION</p><h2>FLClash 主连接</h2><p>新建设备后复制订阅 URL 到 FLClash；WireGuard 配置和 IKEv2 仅作为备用连接。</p></div><button id="new-device">新增设备</button></section>
+    <section><div class="section-title"><div><h2>服务器状态</h2><p>检查的是服务器本机监听、转发与 NAT；不显示任何密钥或密码。</p></div><button id="refresh-status" class="secondary">刷新状态</button></div><div id="diagnostics" class="diagnostic-grid"></div></section>
     <section><div class="section-title"><h2>设备</h2><p>每台设备各有独立配置，可单独撤销。</p></div><div id="devices" class="device-grid"></div></section>
     <section><div class="section-title"><h2>高级协议中心</h2><p>部署并填写配置后才能启用；启用的节点会自动进入每台设备的 FLClash 订阅。</p></div><div id="protocols" class="protocol-list"></div></section>
   </main>

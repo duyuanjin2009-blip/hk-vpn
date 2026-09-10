@@ -8,6 +8,7 @@
         "type": "hysteria2",
         "server": "vpn.example.com",
         "port": 8443,
+        "service": "REPLACE_WITH_HYSTERIA2_SYSTEMD_UNIT",
         "password": "REPLACE_WITH_A_LONG_RANDOM_PASSWORD",
         "sni": "vpn.example.com",
         "skip-cert-verify": false
@@ -21,6 +22,7 @@
         "type": "tuic",
         "server": "vpn.example.com",
         "port": 8444,
+        "service": "REPLACE_WITH_TUIC_SYSTEMD_UNIT",
         "uuid": "REPLACE_WITH_UUID",
         "password": "REPLACE_WITH_PASSWORD",
         "sni": "vpn.example.com",
@@ -36,6 +38,7 @@
         "type": "ss",
         "server": "vpn.example.com",
         "port": 8388,
+        "service": "REPLACE_WITH_SHADOWSOCKS_SYSTEMD_UNIT",
         "cipher": "2022-blake3-aes-128-gcm",
         "password": "REPLACE_WITH_2022_SERVER_KEY",
         "udp": true
@@ -49,6 +52,7 @@
         "type": "vless",
         "server": "vpn.example.com",
         "port": 443,
+        "service": "REPLACE_WITH_VLESS_SYSTEMD_UNIT",
         "uuid": "REPLACE_WITH_UUID",
         "network": "grpc",
         "tls": true,
@@ -63,6 +67,7 @@
         "type": "trojan",
         "server": "vpn.example.com",
         "port": 443,
+        "service": "REPLACE_WITH_TROJAN_SYSTEMD_UNIT",
         "password": "REPLACE_WITH_PASSWORD",
         "sni": "vpn.example.com"
       }
@@ -75,6 +80,11 @@
         "type": "openvpn",
         "server": "vpn.example.com",
         "port": 1194,
+        "service": "REPLACE_WITH_OPENVPN_SYSTEMD_UNIT",
+        "proto": "udp",
+        "username": "REPLACE_WITH_OPENVPN_USERNAME",
+        "password": "REPLACE_WITH_OPENVPN_PASSWORD",
+        "ca": "REPLACE_WITH_OPENVPN_CA_CERTIFICATE",
         "udp": true,
         "cipher": "AES-256-GCM",
         "auth": "sha256"
