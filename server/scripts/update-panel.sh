@@ -18,6 +18,9 @@ chmod 755 "$install_dir/server/scripts/vpnctl.py" "$install_dir/server/scripts/u
 
 install -d -m 711 /usr/local/libexec/hk-vpn
 install -m 700 "$install_dir/server/scripts/vpnctl.py" /usr/local/libexec/hk-vpn/vpnctl.py
+if [ -f "$install_dir/server/scripts/wg-routing.sh" ]; then
+  install -m 700 "$install_dir/server/scripts/wg-routing.sh" /usr/local/libexec/hk-vpn/wg-routing.sh
+fi
 install -m 644 "$install_dir/server/systemd/hk-vpn-panel.service" /etc/systemd/system/hk-vpn-panel.service
 install -m 644 "$install_dir/server/systemd/hk-vpn-reconcile.service" /etc/systemd/system/hk-vpn-reconcile.service
 
