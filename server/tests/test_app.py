@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -26,6 +27,7 @@ from app.main import application  # noqa: E402
 
 
 def request(path, method="GET", body=None, cookie=""):
+    parsed = urlsplit(path)
     raw = body if isinstance(body, bytes) else (json.dumps(body).encode() if body is not None else b"")
     received = {}
     def start_response(status, headers):
@@ -33,7 +35,7 @@ def request(path, method="GET", body=None, cookie=""):
         for header_name, header_value in headers:
             header_name.encode("latin-1"); header_value.encode("latin-1")
         received["status"] = status; received["headers"] = dict(headers)
-    result = application({"REQUEST_METHOD": method, "PATH_INFO": path, "wsgi.input": io.BytesIO(raw), "CONTENT_LENGTH": str(len(raw)), "HTTP_COOKIE": cookie}, start_response)
+    result = application({"REQUEST_METHOD": method, "PATH_INFO": parsed.path, "QUERY_STRING": parsed.query, "wsgi.input": io.BytesIO(raw), "CONTENT_LENGTH": str(len(raw)), "HTTP_COOKIE": cookie}, start_response)
     return received, b"".join(result)
 
 
@@ -55,6 +57,8 @@ class PanelTests(unittest.TestCase):
     def test_admin_can_create_device(self):
         response, _ = request("/login", "POST", b"password=test-password")
         cookie = response["headers"]["Set-Cookie"].split(";", 1)[0]
+        response, body = request("/api/health", cookie=cookie)
+        self.assertEqual(json.loads(body)["version"], main.APP_VERSION)
         response, body = request("/api/devices", "POST", {"name": "Windows", "platform": "Windows"}, cookie)
         self.assertTrue(response["status"].startswith("201"))
         device = json.loads(body)["device"]
@@ -121,6 +125,24 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(port, 51820)
         self.assertEqual(peers, [{"publicKey": "peer-key", "latestHandshake": 123, "receivedBytes": 456, "sentBytes": 789}])
         self.assertEqual(vpnctl.listening_ports("UNCONN 0 0 0.0.0.0:51820 0.0.0.0:*\n"), {51820})
+
+    def test_traffic_history_records_deltas_and_openvpn_is_not_emitted(self):
+        response, _ = request("/login", "POST", b"password=test-password")
+        cookie = response["headers"]["Set-Cookie"].split(";", 1)[0]
+        response, body = request("/api/devices", "POST", {"name": "流量测试", "platform": "FLClash"}, cookie)
+        device = json.loads(body)["device"]
+        row = main.database().execute("SELECT * FROM devices WHERE id=?", (device["id"],)).fetchone()
+        stamp = main.now() - 61
+        first = {"wireguardInterface": True, "peers": [{"publicKey": row["wg_public_key"], "latestHandshake": stamp, "receivedBytes": 100, "sentBytes": 200}]}
+        second = {"wireguardInterface": True, "peers": [{"publicKey": row["wg_public_key"], "latestHandshake": stamp + 61, "receivedBytes": 450, "sentBytes": 900}]}
+        main.record_traffic_samples(first, stamp)
+        main.record_traffic_samples(second, stamp + 61)
+        with patch("app.main.vpnctl_json", return_value=second):
+            response, body = request(f"/api/devices/{device['id']}/traffic?range=24h", cookie=cookie)
+        history = json.loads(body)
+        self.assertGreaterEqual(history["clientToServerBytes"], 350)
+        self.assertGreaterEqual(history["serverToClientBytes"], 700)
+        self.assertEqual(main.protocol_ready({"config": {"type": "openvpn", "server": "vpn.test", "port": 1194, "service": "openvpn.service", "ca": "cert", "username": "user", "password": "pass"}})[0], False)
 
 
 if __name__ == "__main__":

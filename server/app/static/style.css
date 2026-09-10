@@ -4,3 +4,5 @@
 
 /* Connection state: counters are server-side cumulative totals, never speed. */
 .connection{margin:13px 0 4px;font-size:.86rem;font-weight:700}.connection.ok{color:#79e2b5}.connection.wait{color:#ffe08a}.connection.idle{color:#b9ccda}.connection.bad{color:#ffc2c6}.traffic{margin:0;font-size:.78rem;line-height:1.45}.traffic small{color:#7890a2}.section-title>div{min-width:0}
+
+.history-note{margin:7px 0 0;font-size:.78rem;color:#9db4c7}.history-note small{color:#718b9f}.history-controls{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 10px}.history-controls button{padding:6px 9px;font-size:.76rem}.history-total{font-size:.88rem;margin-bottom:8px}.traffic-bars{height:104px;display:flex;align-items:end;gap:2px;padding:6px;background:#07121e;border:1px solid #28475e;border-radius:10px;overflow:hidden}.traffic-bars i{display:block;flex:1;min-width:3px;max-width:12px;background:linear-gradient(#42c6f2,#2a6686);border-radius:3px 3px 1px 1px}.traffic-bars span{color:#7890a2;font-size:.8rem;margin:auto}.wireguard-qr{display:block;width:min(270px,100%);margin:14px auto 0;border-radius:12px;background:#fff;padding:10px}

@@ -18,6 +18,7 @@ import secrets
 import shutil
 import sqlite3
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -41,6 +42,12 @@ DNS_SERVERS = [x.strip() for x in os.environ.get("HKVPN_DNS", "1.1.1.1,1.0.0.1")
 VPNCTL = os.environ.get("HKVPN_CTL", "/usr/local/libexec/hk-vpn/vpnctl.py")
 STATIC_DIR = Path(__file__).with_name("static")
 SAFE_SYSTEMD_UNIT = re.compile(r"^[A-Za-z0-9@_.:-]{1,128}$")
+FLCLASH_UNSUPPORTED_TYPES = {"openvpn"}
+APP_VERSION = "2026.09.10-traffic"
+TRAFFIC_RETENTION_SECONDS = 31 * 24 * 60 * 60
+TRAFFIC_SAMPLE_MIN_SECONDS = 60
+TRAFFIC_SAMPLER_SECONDS = 300
+TRAFFIC_SAMPLE_LOCK = threading.Lock()
 
 
 def now() -> int:
@@ -110,9 +117,23 @@ def database() -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS traffic_samples (
+          device_id TEXT NOT NULL,
+          recorded_at INTEGER NOT NULL,
+          client_to_server_bytes INTEGER NOT NULL,
+          server_to_client_bytes INTEGER NOT NULL,
+          latest_handshake_at INTEGER,
+          PRIMARY KEY (device_id, recorded_at)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS traffic_samples_device_time ON traffic_samples(device_id, recorded_at)")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)")}
     if "client_id" not in columns:
         conn.execute("ALTER TABLE devices ADD COLUMN client_id TEXT UNIQUE")
+    conn.commit()
     return conn
 
 
@@ -148,6 +169,11 @@ def protocol_ready(node: dict[str, Any]) -> tuple[bool, str | None]:
     if "REPLACE_WITH_" in raw or "vpn.example.com" in raw:
         return False, "尚未填写真实域名、密码或 UUID"
     protocol_type = str(config.get("type", ""))
+    if protocol_type in FLCLASH_UNSUPPORTED_TYPES:
+        # Some upstream Mihomo builds document OpenVPN, but the FLClash core on
+        # the user's device rejects it outright. One unsupported proxy makes
+        # the entire subscription fail to load, so never emit it here.
+        return False, "当前 FLClash 内核不支持 OpenVPN 节点；请用 OpenVPN 官方客户端"
     common = ("name", "server", "port", "service")
     required = {
         "hysteria2": ("password", "sni"),
@@ -328,7 +354,7 @@ def connection_for(row: sqlite3.Row, status: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def public_device(row: sqlite3.Row, connection: dict[str, Any] | None = None) -> dict[str, Any]:
+def public_device(row: sqlite3.Row, connection: dict[str, Any] | None = None, traffic_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     value = {
         "id": row["id"], "name": row["name"], "platform": row["platform"],
         "createdAt": row["created_at"], "revokedAt": row["revoked_at"],
@@ -338,6 +364,8 @@ def public_device(row: sqlite3.Row, connection: dict[str, Any] | None = None) ->
     }
     if connection is not None:
         value["connection"] = connection
+    if traffic_summary is not None:
+        value["trafficSummary"] = traffic_summary
     return value
 
 
@@ -358,6 +386,85 @@ def public_diagnostics(status: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def byte_delta(previous: int, current: int) -> int:
+    """Counters reset after a peer/server restart; count the new counter then."""
+    return current - previous if current >= previous else current
+
+
+def record_traffic_samples(status: dict[str, Any], recorded_at: int | None = None) -> None:
+    """Persist a bounded device traffic timeline without storing any keys."""
+    if status.get("error") or not TRAFFIC_SAMPLE_LOCK.acquire(blocking=False):
+        return
+    try:
+        stamp = recorded_at or now()
+        conn = database()
+        rows = conn.execute("SELECT * FROM devices WHERE revoked_at IS NULL").fetchall()
+        for row in rows:
+            connection = connection_for(row, status)
+            if connection["state"] in {"unknown", "not-provisioned"}:
+                continue
+            previous = conn.execute(
+                "SELECT recorded_at FROM traffic_samples WHERE device_id=? ORDER BY recorded_at DESC LIMIT 1", (row["id"],)
+            ).fetchone()
+            if previous and stamp - previous["recorded_at"] < TRAFFIC_SAMPLE_MIN_SECONDS:
+                continue
+            conn.execute(
+                "INSERT INTO traffic_samples(device_id,recorded_at,client_to_server_bytes,server_to_client_bytes,latest_handshake_at) VALUES (?,?,?,?,?)",
+                (row["id"], stamp, connection.get("clientToServerBytes", 0), connection.get("serverToClientBytes", 0), connection.get("lastHandshakeAt")),
+            )
+        conn.execute("DELETE FROM traffic_samples WHERE recorded_at < ?", (stamp - TRAFFIC_RETENTION_SECONDS,))
+        conn.commit()
+        conn.close()
+    except sqlite3.Error as exc:
+        print(f"traffic sample failed: {exc}", flush=True)
+    finally:
+        TRAFFIC_SAMPLE_LOCK.release()
+
+
+def traffic_history(conn: sqlite3.Connection, device_id: str, range_name: str) -> dict[str, Any]:
+    ranges = {"24h": 24 * 60 * 60, "7d": 7 * 24 * 60 * 60, "30d": 30 * 24 * 60 * 60}
+    seconds = ranges.get(range_name, ranges["24h"])
+    cutoff = now() - seconds
+    baseline = conn.execute(
+        "SELECT * FROM traffic_samples WHERE device_id=? AND recorded_at < ? ORDER BY recorded_at DESC LIMIT 1", (device_id, cutoff)
+    ).fetchone()
+    records = conn.execute(
+        "SELECT * FROM traffic_samples WHERE device_id=? AND recorded_at >= ? ORDER BY recorded_at", (device_id, cutoff)
+    ).fetchall()
+    previous = baseline
+    points: list[dict[str, int]] = []
+    upload_total = download_total = 0
+    for record in records:
+        upload = download = 0
+        if previous is not None:
+            upload = byte_delta(previous["client_to_server_bytes"], record["client_to_server_bytes"])
+            download = byte_delta(previous["server_to_client_bytes"], record["server_to_client_bytes"])
+        upload_total += upload; download_total += download
+        points.append({"recordedAt": record["recorded_at"], "clientToServerBytes": upload, "serverToClientBytes": download})
+        previous = record
+    # A 30-day view is still compact enough for mobile browsers.
+    if len(points) > 60:
+        size = (len(points) + 59) // 60
+        points = [
+            {"recordedAt": group[-1]["recordedAt"], "clientToServerBytes": sum(point["clientToServerBytes"] for point in group), "serverToClientBytes": sum(point["serverToClientBytes"] for point in group)}
+            for group in (points[index:index + size] for index in range(0, len(points), size))
+        ]
+    first = conn.execute("SELECT recorded_at FROM traffic_samples WHERE device_id=? ORDER BY recorded_at LIMIT 1", (device_id,)).fetchone()
+    return {
+        "range": range_name, "sampleCount": len(records), "recordingSince": first["recorded_at"] if first else None,
+        "clientToServerBytes": upload_total, "serverToClientBytes": download_total, "points": points,
+    }
+
+
+def traffic_sampler_loop() -> None:
+    while True:
+        try:
+            record_traffic_samples(vpnctl_json("status"))
+        except Exception as exc:
+            print(f"traffic sampler failed: {exc}", flush=True)
+        time.sleep(TRAFFIC_SAMPLER_SECONDS)
+
+
 def wireguard_config(row: sqlite3.Row) -> str:
     dns = ", ".join(DNS_SERVERS)
     return f"""[Interface]
@@ -372,6 +479,21 @@ Endpoint = {WG_ENDPOINT}
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 """
+
+
+def wireguard_qr_png(row: sqlite3.Row) -> bytes:
+    """Create an admin-only WireGuard import QR code in memory."""
+    if not shutil.which("qrencode"):
+        raise ValueError("服务器未安装 qrencode，请执行安全更新脚本后重试")
+    try:
+        result = subprocess.run(
+            ["qrencode", "-t", "PNG", "-o", "-"], input=wireguard_config(row).encode(), capture_output=True, timeout=10
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("二维码生成超时") from exc
+    if result.returncode or not result.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("二维码生成失败")
+    return result.stdout
 
 
 def flclash_subscription(row: sqlite3.Row) -> str:
@@ -477,6 +599,10 @@ class Request:
     def path(self) -> str:
         return unquote(self.environ.get("PATH_INFO", "/"))
 
+    @property
+    def query(self) -> dict[str, list[str]]:
+        return parse_qs(self.environ.get("QUERY_STRING", ""))
+
     def cookie(self, name: str) -> str | None:
         jar = SimpleCookie(self.environ.get("HTTP_COOKIE", ""))
         return jar[name].value if name in jar else None
@@ -554,7 +680,7 @@ def static_response(start_response, name: str):
 def api(req: Request, start_response):
     conn = database()
     if req.path == "/api/health" and req.method == "GET":
-        return json_response(start_response, HTTPStatus.OK, {"ok": True, "wireGuardEndpoint": WG_ENDPOINT, "protocols": len(enabled_protocols())})
+        return json_response(start_response, HTTPStatus.OK, {"ok": True, "version": APP_VERSION, "wireGuardEndpoint": WG_ENDPOINT, "protocols": len(enabled_protocols())})
     if req.path == "/api/diagnostics" and req.method == "GET":
         return json_response(start_response, HTTPStatus.OK, public_diagnostics(vpnctl_json("status")))
     if req.path == "/api/protocols" and req.method == "GET":
@@ -579,8 +705,9 @@ def api(req: Request, start_response):
     if req.path == "/api/devices" and req.method == "GET":
         rows = conn.execute("SELECT * FROM devices ORDER BY created_at DESC").fetchall()
         wireguard_status = vpnctl_json("status")
+        record_traffic_samples(wireguard_status)
         return json_response(start_response, HTTPStatus.OK, {
-            "devices": [public_device(row, connection_for(row, wireguard_status)) for row in rows],
+            "devices": [public_device(row, connection_for(row, wireguard_status), traffic_history(conn, row["id"], "24h")) for row in rows],
             "checkedAt": wireguard_status.get("checkedAt"),
             "connectionError": wireguard_status.get("error"),
         })
@@ -620,6 +747,12 @@ def api(req: Request, start_response):
             # WSGI headers are Latin-1. Device names may be Chinese, so never put
             # them in Content-Disposition; the opaque ID is URL/header safe.
             return response(start_response, HTTPStatus.OK, wireguard_config(row).encode(), "text/plain; charset=utf-8", [("Content-Disposition", f'attachment; filename="hk-vpn-{row["id"]}.conf"'), ("Cache-Control", "no-store")])
+        if action == "wireguard.png" and req.method == "GET":
+            return response(start_response, HTTPStatus.OK, wireguard_qr_png(row), "image/png", [("Cache-Control", "no-store")])
+        if action == "traffic" and req.method == "GET":
+            range_name = req.query.get("range", ["24h"])[0]
+            record_traffic_samples(vpnctl_json("status"))
+            return json_response(start_response, HTTPStatus.OK, traffic_history(conn, device_id, range_name))
         if action == "ikev2" and req.method == "GET":
             return json_response(start_response, HTTPStatus.OK, {"server": WG_ENDPOINT.rsplit(":", 1)[0], "username": row["ike_username"], "password": row["ike_password"], "type": "IKEv2 / IPsec EAP-MSCHAPv2"})
         if action == "reconcile" and req.method == "POST":
@@ -667,5 +800,6 @@ def native_enroll(req: Request, start_response):
 if __name__ == "__main__":
     host = os.environ.get("HKVPN_BIND", "127.0.0.1")
     port = int(os.environ.get("HKVPN_PORT", "8787"))
+    threading.Thread(target=traffic_sampler_loop, name="hk-vpn-traffic", daemon=True).start()
     print(f"HK VPN panel listening on {host}:{port}", flush=True)
     make_server(host, port, application).serve_forever()

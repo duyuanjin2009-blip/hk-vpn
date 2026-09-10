@@ -106,6 +106,8 @@ journalctl -u strongswan-swanctl -n 100 --no-pager
 - **当前没有活动**：配置仍在，但超过 3 分钟没有新握手。
 - **手机 → 服务器 / 服务器 → 手机**：这是服务端的累计 WireGuard 字节方向，**不是实时网速**，不可用来判断刚连接瞬间的速度。
 
+FLClash 的不同内核版本支持的节点类型不完全一致。若 FLClash 显示 `unsupported proxy type: openvpn`，说明它拒绝了整个订阅中的 OpenVPN 节点；关闭该节点并更新订阅即可恢复 WireGuard。OpenVPN 应使用官方 OpenVPN 客户端独立导入，不写入 FLClash 订阅。
+
 ## 5. 启用附加 FLClash 协议
 
 每一种协议都必须先部署对应服务、替换 `protocols.json` 的示例密码/UUID/域名和 `service`（真实 systemd 单元名）、用独立客户端测试成功，最后才将该模块的 `enabled` 改为 `true`。网页会同时检查对应 TCP/UDP 端口是否正由本机监听，以及该 systemd 服务是否在运行；两项任一失败，节点不能开启，已开启后服务停止时会自动从订阅隐藏，WireGuard 节点仍会保留。
@@ -126,7 +128,11 @@ chmod +x server/scripts/update-panel.sh
 systemctl status hk-vpn-panel --no-pager
 ```
 
-刷新浏览器后可看到“服务状态与端口检测”。它会显示 WireGuard 接口和实际 UDP 监听端口、IPv4 转发、wg0 转发规则、NAT 规则、StrongSwan 服务以及每设备的握手状态；它不能替代外网 UDP 实测。
+刷新浏览器后可看到“服务状态与端口检测”。它会显示 WireGuard 接口和实际 UDP 监听端口、IPv4 转发、wg0 转发规则、NAT 规则、StrongSwan 服务以及每设备的握手状态；它不能替代外网 UDP 实测。页面顶端会显示版本，例如 `2026.09.10-traffic`；若显示“旧版面板”，表示服务器尚未更新成功或浏览器仍在展示旧页面。
+
+新版会每 5 分钟记录一次每台设备的累计 WireGuard 字节，并保留 31 天；打开设备详情可查看 24 小时、7 天或 30 天流量。首次更新后先连接设备、等待至少 1 分钟并点击“刷新状态”，第二个样本出现后才会有可计算的流量记录。
+
+设备详情还提供 WireGuard `.conf` 下载和导入二维码。二维码包含该设备私钥，只能在自己的设备上展示，使用后关闭详情页，不要截图或转发。
 
 ## 7. 回滚
 
