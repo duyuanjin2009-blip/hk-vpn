@@ -84,6 +84,11 @@ def active(*units: str) -> bool:
     return any(subprocess.run(["systemctl", "is-active", "--quiet", unit], check=False).returncode == 0 for unit in units)
 
 
+def default_interface() -> str | None:
+    match = re.search(r"\bdev\s+(\S+)", command_output("ip", "-4", "route", "show", "default"))
+    return match.group(1) if match else None
+
+
 def read_state() -> dict[str, dict[str, str]]:
     if not STATE_PATH.exists():
         return {}
@@ -184,13 +189,19 @@ def status(args: argparse.Namespace) -> None:
     nat_rules = command_output("iptables", "-t", "nat", "-S", "POSTROUTING")
     forward_rules = command_output("iptables", "-S", "FORWARD")
     forwarding = Path("/proc/sys/net/ipv4/ip_forward").read_text().strip() == "1"
+    wan_interface = default_interface()
+    subnet = str(WG_SUBNET)
+    expected_outbound = f"-A FORWARD -s {subnet} -i {WG_INTERFACE} -o {wan_interface} -j ACCEPT" if wan_interface else ""
+    expected_inbound = f"-A FORWARD -d {subnet} -i {wan_interface} -o {WG_INTERFACE} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" if wan_interface else ""
+    expected_nat = f"-A POSTROUTING -s {subnet} -o {wan_interface} -j MASQUERADE" if wan_interface else ""
     print(json.dumps({
         "wireguardInterface": Path(f"/sys/class/net/{WG_INTERFACE}").exists(),
         "wireguardListenPort": listen_port,
         "wireguardPort": bool(listen_port and re.search(rf"(?:\[::\]|0\.0\.0\.0):{listen_port}(?!\d)", listeners)),
         "ipForward": forwarding,
-        "nat": "MASQUERADE" in nat_rules,
-        "forwardRules": f"-A FORWARD -i {WG_INTERFACE}" in forward_rules and f"-A FORWARD -o {WG_INTERFACE}" in forward_rules,
+        "wanInterface": wan_interface,
+        "nat": expected_nat in nat_rules,
+        "forwardRules": expected_outbound in forward_rules and expected_inbound in forward_rules,
         "strongSwan": active("strongswan-swanctl.service", "strongswan-starter.service"),
         "checkedAt": int(time.time()),
         "peers": peers,
