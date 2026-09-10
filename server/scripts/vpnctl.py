@@ -13,6 +13,7 @@ import ipaddress
 import json
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -87,6 +88,18 @@ def active(*units: str) -> bool:
 def default_interface() -> str | None:
     match = re.search(r"\bdev\s+(\S+)", command_output("ip", "-4", "route", "show", "default"))
     return match.group(1) if match else None
+
+
+def has_iptables_rule(output: str, chain: str, required: list[str]) -> bool:
+    """Match rule fields without depending on iptables' printed field order."""
+    for line in output.splitlines():
+        try:
+            fields = shlex.split(line)
+        except ValueError:
+            continue
+        if len(fields) >= 2 and fields[0] == "-A" and fields[1] == chain and all(item in fields for item in required):
+            return True
+    return False
 
 
 def read_state() -> dict[str, dict[str, str]]:
@@ -191,17 +204,17 @@ def status(args: argparse.Namespace) -> None:
     forwarding = Path("/proc/sys/net/ipv4/ip_forward").read_text().strip() == "1"
     wan_interface = default_interface()
     subnet = str(WG_SUBNET)
-    expected_outbound = f"-A FORWARD -s {subnet} -i {WG_INTERFACE} -o {wan_interface} -j ACCEPT" if wan_interface else ""
-    expected_inbound = f"-A FORWARD -d {subnet} -i {wan_interface} -o {WG_INTERFACE} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" if wan_interface else ""
-    expected_nat = f"-A POSTROUTING -s {subnet} -o {wan_interface} -j MASQUERADE" if wan_interface else ""
+    outbound_fields = ["-s", subnet, "-i", WG_INTERFACE, "-o", wan_interface, "-j", "ACCEPT"] if wan_interface else []
+    inbound_fields = ["-d", subnet, "-i", wan_interface, "-o", WG_INTERFACE, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"] if wan_interface else []
+    nat_fields = ["-s", subnet, "-o", wan_interface, "-j", "MASQUERADE"] if wan_interface else []
     print(json.dumps({
         "wireguardInterface": Path(f"/sys/class/net/{WG_INTERFACE}").exists(),
         "wireguardListenPort": listen_port,
         "wireguardPort": bool(listen_port and re.search(rf"(?:\[::\]|0\.0\.0\.0):{listen_port}(?!\d)", listeners)),
         "ipForward": forwarding,
         "wanInterface": wan_interface,
-        "nat": expected_nat in nat_rules,
-        "forwardRules": expected_outbound in forward_rules and expected_inbound in forward_rules,
+        "nat": has_iptables_rule(nat_rules, "POSTROUTING", nat_fields),
+        "forwardRules": has_iptables_rule(forward_rules, "FORWARD", outbound_fields) and has_iptables_rule(forward_rules, "FORWARD", inbound_fields),
         "strongSwan": active("strongswan-swanctl.service", "strongswan-starter.service"),
         "checkedAt": int(time.time()),
         "peers": peers,
