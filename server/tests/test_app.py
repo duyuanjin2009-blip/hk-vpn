@@ -54,7 +54,8 @@ class PanelTests(unittest.TestCase):
         self.assertTrue(response["status"].startswith("200"))
         self.assertIn(b"type: 'wireguard'", body)
         self.assertIn(b"dns:", body)
-        self.assertIn(b"enhanced-mode: 'redir-host'", body)
+        self.assertIn(b"enhanced-mode: 'fake-ip'", body)
+        self.assertIn(b"fake-ip-range: '198.18.0.1/16'", body)
 
     def test_admin_can_create_device(self):
         response, _ = request("/login", "POST", b"password=test-password")
