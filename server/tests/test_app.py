@@ -128,6 +128,8 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(port, 51820)
         self.assertEqual(peers, [{"publicKey": "peer-key", "latestHandshake": 123, "receivedBytes": 456, "sentBytes": 789}])
         self.assertEqual(vpnctl.listening_ports("UNCONN 0 0 0.0.0.0:51820 0.0.0.0:*\n"), {51820})
+        rules = "-A FORWARD -i wg0 -o ens17 -s 10.88.0.0/24 -j ACCEPT\n"
+        self.assertTrue(vpnctl.has_iptables_rule(rules, "FORWARD", ["-s", "10.88.0.0/24", "-i", "wg0", "-o", "ens17", "-j", "ACCEPT"]))
 
     def test_traffic_history_records_deltas_and_openvpn_is_not_emitted(self):
         response, _ = request("/login", "POST", b"password=test-password")
