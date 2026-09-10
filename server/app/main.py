@@ -477,7 +477,9 @@ MTU = 1380
 [Peer]
 PublicKey = {WG_PUBLIC_KEY}
 Endpoint = {WG_ENDPOINT}
-AllowedIPs = 0.0.0.0/0, ::/0
+# The gateway is intentionally IPv4-only; routing ::/0 into an IPv4-only
+# server creates an IPv6 blackhole on Android dual-stack networks.
+AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 """
 
