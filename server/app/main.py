@@ -43,7 +43,7 @@ VPNCTL = os.environ.get("HKVPN_CTL", "/usr/local/libexec/hk-vpn/vpnctl.py")
 STATIC_DIR = Path(__file__).with_name("static")
 SAFE_SYSTEMD_UNIT = re.compile(r"^[A-Za-z0-9@_.:-]{1,128}$")
 FLCLASH_UNSUPPORTED_TYPES = {"openvpn"}
-APP_VERSION = "2026.09.10-routing-v2"
+APP_VERSION = "2026.09.10-routing-v3-dns"
 TRAFFIC_RETENTION_SECONDS = 31 * 24 * 60 * 60
 TRAFFIC_SAMPLE_MIN_SECONDS = 60
 TRAFFIC_SAMPLER_SECONDS = 300
@@ -528,8 +528,13 @@ def flclash_subscription(row: sqlite3.Row) -> str:
         "dns": {
             "enable": True,
             "ipv6": False,
-            "enhanced-mode": "redir-host",
+            # Keep the original hostname through the proxy.  redir-host can
+            # turn a poisoned/wrong DNS answer into a TLS certificate mismatch
+            # (for example, google.com.hk receiving another site's cert).
+            "enhanced-mode": "fake-ip",
+            "fake-ip-range": "198.18.0.1/16",
             "nameserver": DNS_SERVERS,
+            "fake-ip-filter": ["*.lan", "*.local", "localhost.ptlogin2.qq.com"],
         },
         "tun": {"enable": True, "stack": "mixed", "auto-route": True, "auto-detect-interface": True, "dns-hijack": ["any:53"]},
         "proxies": nodes,
